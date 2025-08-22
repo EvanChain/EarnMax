@@ -50,7 +50,7 @@ contract RouterScript is Script {
         // place a swap order
         piv.placeOrder(
             wbtc,
-            wbtcAmount/10,
+            wbtcAmount / 10,
             usdc,
             price,
             2 // interest rate mode

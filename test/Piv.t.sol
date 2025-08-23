@@ -246,7 +246,12 @@ contract PIVTest is Test {
 
         // construct swap units to convert debtToken -> collateralToken
         SwapUnit[] memory units = new SwapUnit[](1);
-        units[0] = SwapUnit({adapter: address(adapter), tokenIn: address(usdc), tokenOut: address(weth), swapData: abi.encode(collateralAmount)});
+        units[0] = SwapUnit({
+            adapter: address(adapter),
+            tokenIn: address(usdc),
+            tokenOut: address(weth),
+            swapData: abi.encode(collateralAmount)
+        });
 
         // call createPosition as the owner (user)
         vm.prank(user);

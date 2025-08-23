@@ -22,13 +22,7 @@ contract MockAavePool is IAaveV3PoolMinimal {
     // user -> asset -> debt
     mapping(address => mapping(address => uint256)) public userDebt;
 
-    function initReserve(
-        address asset,
-        address aTokenAddress,
-        address,
-        address,
-        address
-    ) external override {
+    function initReserve(address asset, address aTokenAddress, address, address, address) external override {
         reserves[asset].aTokenAddress = aTokenAddress;
         // let the aToken know who is the pool
         MockAToken(aTokenAddress).setPool(address(this));
@@ -93,34 +87,104 @@ contract MockAavePool is IAaveV3PoolMinimal {
 
     // The following functions are not used in the minimal mock but required by the interface. Provide stub implementations.
     function mintUnbacked(address, uint256, address, uint16) external override {}
-    function backUnbacked(address, uint256, uint256) external override returns (uint256) { return 0; }
+
+    function backUnbacked(address, uint256, uint256) external override returns (uint256) {
+        return 0;
+    }
+
     function supplyWithPermit(address, uint256, address, uint16, uint256, uint8, bytes32, bytes32) external override {}
-    function repayWithPermit(address, uint256, uint256, address, uint256, uint8, bytes32, bytes32) external override returns (uint256) { return 0; }
-    function repayWithATokens(address, uint256, uint256) external override returns (uint256) { return 0; }
+
+    function repayWithPermit(address, uint256, uint256, address, uint256, uint8, bytes32, bytes32)
+        external
+        override
+        returns (uint256)
+    {
+        return 0;
+    }
+
+    function repayWithATokens(address, uint256, uint256) external override returns (uint256) {
+        return 0;
+    }
+
     function swapBorrowRateMode(address, uint256) external override {}
     function rebalanceStableBorrowRate(address, address) external override {}
     function setUserUseReserveAsCollateral(address, bool) external override {}
     function liquidationCall(address, address, address, uint256, bool) external override {}
-    function flashLoan(address, address[] calldata, uint256[] calldata, uint256[] calldata, address, bytes calldata, uint16) external override {}
-    function getUserAccountData(address) external view override returns (uint256, uint256, uint256, uint256, uint256, uint256) { return (0,0,0,0,0,0); }
+    function flashLoan(
+        address,
+        address[] calldata,
+        uint256[] calldata,
+        uint256[] calldata,
+        address,
+        bytes calldata,
+        uint16
+    ) external override {}
+
+    function getUserAccountData(address)
+        external
+        view
+        override
+        returns (uint256, uint256, uint256, uint256, uint256, uint256)
+    {
+        return (0, 0, 0, 0, 0, 0);
+    }
+
     function dropReserve(address) external override {}
     function setReserveInterestRateStrategyAddress(address, address) external override {}
     function setConfiguration(address, ReserveConfigurationMap calldata) external override {}
-    function getConfiguration(address) external view override returns (ReserveConfigurationMap memory) { return ReserveConfigurationMap({data:0}); }
-    function getReserveNormalizedIncome(address) external view override returns (uint256) { return 0; }
-    function getReserveNormalizedVariableDebt(address) external view override returns (uint256) { return 0; }
+
+    function getConfiguration(address) external view override returns (ReserveConfigurationMap memory) {
+        return ReserveConfigurationMap({data: 0});
+    }
+
+    function getReserveNormalizedIncome(address) external view override returns (uint256) {
+        return 0;
+    }
+
+    function getReserveNormalizedVariableDebt(address) external view override returns (uint256) {
+        return 0;
+    }
+
     function finalizeTransfer(address, address, address, uint256, uint256, uint256) external override {}
-    function getReservesList() external view override returns (address[] memory) { address[] memory empty; return empty; }
-    function getReserveAddressById(uint16) external view override returns (address) { return address(0); }
-    function ADDRESSES_PROVIDER() external view override returns (address) { return address(0); }
+
+    function getReservesList() external view override returns (address[] memory) {
+        address[] memory empty;
+        return empty;
+    }
+
+    function getReserveAddressById(uint16) external view override returns (address) {
+        return address(0);
+    }
+
+    function ADDRESSES_PROVIDER() external view override returns (address) {
+        return address(0);
+    }
+
     function updateBridgeProtocolFee(uint256) external override {}
     function setUserEMode(uint8) external override {}
-    function getUserEMode(address) external view override returns (uint256) { return 0; }
+
+    function getUserEMode(address) external view override returns (uint256) {
+        return 0;
+    }
+
     function resetIsolationModeTotalDebt(address) external override {}
-    function MAX_STABLE_RATE_BORROW_SIZE_PERCENT() external view override returns (uint256) { return 0; }
-    function BRIDGE_PROTOCOL_FEE() external view override returns (uint256) { return 0; }
-    function FLASHLOAN_PREMIUM_TO_PROTOCOL() external view override returns (uint128) { return FLASHLOAN_PREMIUM_TO_PROTOCOL_CONST; }
-    function MAX_NUMBER_RESERVES() external view override returns (uint16) { return 0; }
+
+    function MAX_STABLE_RATE_BORROW_SIZE_PERCENT() external view override returns (uint256) {
+        return 0;
+    }
+
+    function BRIDGE_PROTOCOL_FEE() external view override returns (uint256) {
+        return 0;
+    }
+
+    function FLASHLOAN_PREMIUM_TO_PROTOCOL() external view override returns (uint128) {
+        return FLASHLOAN_PREMIUM_TO_PROTOCOL_CONST;
+    }
+
+    function MAX_NUMBER_RESERVES() external view override returns (uint16) {
+        return 0;
+    }
+
     function mintToTreasury(address[] calldata) external override {}
     function rescueTokens(address, address, uint256) external override {}
     function deposit(address, uint256, address, uint16) external override {}

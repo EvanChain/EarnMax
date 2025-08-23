@@ -6,8 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract MockAToken is ERC20 {
     address public pool;
 
-    constructor(string memory name_, string memory symbol_) ERC20(name_, symbol_) {
-    }
+    constructor(string memory name_, string memory symbol_) ERC20(name_, symbol_) {}
 
     function setPool(address _pool) external {
         pool = _pool;

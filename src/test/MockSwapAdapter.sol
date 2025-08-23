@@ -7,20 +7,22 @@ import {IERC20SwapAdapter} from "../interfaces/IERC20SwapAdapter.sol";
 import {MockERC20} from "./MockERC20.sol";
 /// @notice Simple mock swap adapter for tests
 /// @dev swapData (optional) should be abi.encode(uint256 outAmount). If omitted, outAmount == tokenInAmt
+
 contract MockSwapAdapter is IERC20SwapAdapter {
     /// @notice Swap tokenIn -> tokenOut for tests
     /// @dev Adapter pulls tokenIn from caller (transferFrom). Then transfers tokenOut from its own balance to recipient.
     /// swapData can contain an abi-encoded uint256 specifying the exact tokenOut amount to send.
-    function swap(
-        address recipient,
-        address tokenIn,
-        address tokenOut,
-        uint256 tokenInAmt,
-        bytes memory swapData
-    ) external override returns (uint256 tokenOutAmt) {
+    function swap(address recipient, address tokenIn, address tokenOut, uint256 tokenInAmt, bytes memory swapData)
+        external
+        override
+        returns (uint256 tokenOutAmt)
+    {
         // pull tokenIn from caller to this adapter for accounting (if non-zero)
         if (tokenInAmt > 0) {
-            require(IERC20(tokenIn).transferFrom(msg.sender, address(this), tokenInAmt), "MockSwapAdapter: transferFrom failed");
+            require(
+                IERC20(tokenIn).transferFrom(msg.sender, address(this), tokenInAmt),
+                "MockSwapAdapter: transferFrom failed"
+            );
         }
 
         // decode desired output amount from swapData if provided

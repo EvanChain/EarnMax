@@ -46,8 +46,9 @@ export default function App() {
 
   // Loan form state
   const [showLoanForm, setShowLoanForm] = useState(false)
-  const [loanCollateralAmtInput, setLoanCollateralAmtInput] = useState('0.01')
-  const [loanDebtAmtInput, setLoanDebtAmtInput] = useState('100')
+  // now the form takes a principal (USDC) and a leverage multiplier; debt and collateral are computed automatically
+  const [loanPrincipalInput, setLoanPrincipalInput] = useState('100') // principal in USDC
+  const [loanSelectedLeverage, setLoanSelectedLeverage] = useState(3)
   const [loanInterestMode, setLoanInterestMode] = useState(2)
   const [loanDeadlineHours, setLoanDeadlineHours] = useState(1)
   const [loanSubmitting, setLoanSubmitting] = useState(false)
@@ -56,6 +57,10 @@ export default function App() {
   const [loanDeadlineDatetime, setLoanDeadlineDatetime] = useState('') // ISO-like local datetime string
   const [loanUseClosePrice, setLoanUseClosePrice] = useState(false)
   const [loanClosePriceInput, setLoanClosePriceInput] = useState('')
+
+  // Pricing / protocol limits used to compute amounts for the form
+  const PT_PRICE_USDC = 0.8 // price of 1 PT in USDC
+  const AAVE_LTV_LIMIT = 0.9 // 90% LTV
 
   // Simulated Pendle scenarios (local only, not on-chain)
   const PENDLE_SCENARIOS = [
@@ -297,8 +302,9 @@ export default function App() {
     }
     // preset the token pair and default amounts
     setLoanTargetTokenPair({ from: mockUSDCAddr, to: mockPtAddr })
-    setLoanCollateralAmtInput('0.01')
-    setLoanDebtAmtInput('100')
+    // preset default principal and leverage
+    setLoanPrincipalInput('100')
+    setLoanSelectedLeverage(3)
     setLoanInterestMode(2)
     setLoanDeadlineHours(1)
     setShowLoanForm(true)
@@ -323,11 +329,29 @@ export default function App() {
         return
       }
 
-      // parse user inputs
+      // parse user inputs: principal (USDC) + leverage -> compute debt (USDC) and collateral (PT)
       const collateralDecimals = 18
       const debtDecimals = 6
-      const collateralAmount = ethers.utils.parseUnits(loanCollateralAmtInput || '0', collateralDecimals)
-      const debtAmount = ethers.utils.parseUnits(loanDebtAmtInput || '0', debtDecimals)
+      const principalNum = Number(loanPrincipalInput || '0')
+      const L = Number(loanSelectedLeverage || 1)
+
+      if (!(principalNum > 0) || !(L >= 1)) {
+        setError('请输入有效的本金与杠杆倍率')
+        setLoanSubmitting(false)
+        return
+      }
+
+      // Compute amounts in human units
+      const debtNum = principalNum * (L - 1) // amount to borrow in USDC
+      const totalPositionValueUSDC = principalNum * L // total position value in USDC
+      // required collateral value (in USDC) to support the borrow under Aave LTV
+      const requiredCollateralValueUSDC = debtNum / AAVE_LTV_LIMIT
+      // We'll use the total position value (principal * L) as collateral value; if that's less than requiredCollateralValueUSDC use requiredCollateralValueUSDC
+      const collateralValueUSDC = Math.max(totalPositionValueUSDC, requiredCollateralValueUSDC)
+      const collateralPT = collateralValueUSDC / PT_PRICE_USDC
+
+      const debtAmount = ethers.utils.parseUnits(debtNum.toFixed(debtDecimals), debtDecimals)
+      const collateralAmount = ethers.utils.parseUnits(collateralPT.toFixed(collateralDecimals), collateralDecimals)
 
       if (collateralAmount.lte(0) || debtAmount.lte(0)) {
         setError('请输入有效的抵押和借款金额')
@@ -487,6 +511,9 @@ export default function App() {
             <button onClick={connectWallet} style={{ padding: '8px 14px', borderRadius: 8, background: 'linear-gradient(90deg,#7c3aed,#3b82f6)', color: 'white', border: 'none', cursor: 'pointer' }}>连接钱包</button>
           )}
 
+          {/* Faucet button moved to top bar for convenience */}
+          <button onClick={callFaucet} disabled={loading || !signer} style={{ padding: '8px 12px', borderRadius: 8, background: '#10b981', color: 'white', border: 'none', cursor: signer ? 'pointer' : 'not-allowed' }}>领取 Faucet</button>
+
           <div style={{ width: 1, height: 28, background: 'rgba(255,255,255,0.03)' }} />
 
           <div style={{ textAlign: 'right' }}>
@@ -521,10 +548,10 @@ export default function App() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1 style={{ margin: 0 }}>EarnMax</h1>
-            <div style={{ color: 'var(--muted)', marginTop: 6 }}>快速查看多种资产在不同杠杆下的示例年化收益（模拟数据，仅供参考）。</div>
+            <div style={{ color: 'var(--muted)', marginTop: 6 }}>快速查看多种资产在不同杠杆下的示例年化收益，仅供参考。</div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ color: 'var(--muted)' }}>模拟 Aave 借出利率</div>
+            <div style={{ color: 'var(--muted)' }}>Aave 借出利率</div>
             <div style={{ fontWeight: 700, fontSize: 18 }}>{aaveRate == null ? `${simulatedAaveRate}%` : `${aaveRate}%`}</div>
           </div>
         </div>
@@ -587,12 +614,12 @@ export default function App() {
           <div style={{ background: 'white', color: 'black', padding: 18, borderRadius: 8, width: 420, maxWidth: '95%' }}>
             <h3 style={{ marginTop: 0 }}>创建杠杆贷款 — USDC → PT-sUSDE</h3>
             <div style={{ marginBottom: 8 }}>
-              <label>抵押 (PT) 数量</label>
-              <input value={loanCollateralAmtInput} onChange={e => setLoanCollateralAmtInput(e.target.value)} style={{ width: '100%', marginTop: 6, padding: 8 }} />
+              <label>本金 (USDC)</label>
+              <input value={loanPrincipalInput} onChange={e => setLoanPrincipalInput(e.target.value)} style={{ width: '100%', marginTop: 6, padding: 8 }} />
             </div>
             <div style={{ marginBottom: 8 }}>
-              <label>借款 (USDC) 数量</label>
-              <input value={loanDebtAmtInput} onChange={e => setLoanDebtAmtInput(e.target.value)} style={{ width: '100%', marginTop: 6, padding: 8 }} />
+              <label>杠杆倍率</label>
+              <input type="number" value={loanSelectedLeverage} onChange={e => setLoanSelectedLeverage(Number(e.target.value))} style={{ width: '100%', marginTop: 6, padding: 8 }} />
             </div>
             <div style={{ marginBottom: 8 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -630,11 +657,11 @@ export default function App() {
                   try {
                     const debtDecimals = 6
                     const collateralDecimals = 18
-                    const coll = ethers.utils.parseUnits(loanCollateralAmtInput || '0', collateralDecimals)
+                    const coll = ethers.utils.parseUnits(loanPrincipalInput || '0', collateralDecimals)
                     const closePriceScaled = ethers.utils.parseUnits(loanClosePriceInput.trim(), debtDecimals)
                     const collateralScale = ethers.BigNumber.from(10).pow(collateralDecimals)
                     const valueInDebt = coll.mul(closePriceScaled).div(collateralScale)
-                    const debt = ethers.utils.parseUnits(loanDebtAmtInput || '0', debtDecimals)
+                    const debt = ethers.utils.parseUnits(loanPrincipalInput || '0', debtDecimals)
                     const expectBN = valueInDebt.gt(debt) ? valueInDebt.sub(debt) : ethers.BigNumber.from(0)
                     return ethers.utils.formatUnits(expectBN, debtDecimals) + ' USDC'
                   } catch (e) {
@@ -652,170 +679,10 @@ export default function App() {
 
       {/* ...existing UI (rest of the page) ... */}
 
-      {/* original content preserved below */}
-      <div style={{ marginBottom: 12 }}>
-        {account ? (
-          <div>已连接钱包: {account}</div>
-        ) : (
-          <button onClick={connectWallet}>连接 MetaMask</button>
-        )}
-      </div>
-
-      <div style={{ marginBottom: 12, color: 'var(--muted)' }}>
-        <label>Aave Pool 地址: </label>
-        <input value={aavePool} onChange={e => setAavePool(e.target.value)} style={{ width: '70%' }} />
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <label>
-          <input type="checkbox" checked={simulateAave} onChange={e => setSimulateAave(e.target.checked)} /> 使用模拟 Aave 借出利率
-        </label>
-        {simulateAave && (
-          <span style={{ marginLeft: 12 }}>
-            模拟利率: <input type="number" step="0.01" value={simulatedAaveRate} onChange={e => setSimulatedAaveRate(Number(e.target.value))} style={{ width: 80 }} /> %
-          </span>
-        )}
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <button onClick={fetchAaveBorrowRate} disabled={loading}>
-          刷新 Aave 借款利率
-        </button>
-      </div>
-
-      <div style={{ marginTop: 20, textAlign: 'left' }}>
-        <h3>利率 (基础)</h3>
-        <div>USDC 在 Aave 的 当前可变借款利率: {aaveRate == null ? '—' : `${aaveRate}%`}</div>
-        <div style={{ marginTop: 8 }}>
-          Pendle PT-sUSDE 的 基础年化收益率 (PT):
-          <input
-            value={pendleYield}
-            onChange={e => setPendleYield(Number(e.target.value))}
-            style={{ width: 100, marginLeft: 8 }}
-            type="number"
-            step="0.01"
-          />
-          %
-        </div>
-      </div>
-
-      <div style={{ marginTop: 20, textAlign: 'left' }}>
-        <h3>杠杆放大 (最多 9x)</h3>
-        <div>
-          <input
-            type="range"
-            min="1"
-            max="9"
-            step="0.1"
-            value={leverage}
-            onChange={e => setLeverage(Number(e.target.value))}
-            style={{ width: '100%' }}
-          />
-          <div>当前杠杆: {leverage}x</div>
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <strong>放大后利率 (简单乘法放大示意)</strong>
-          <div>借款利率 (Aave) 放大后: {amplifiedAave == null ? '—' : `${amplifiedAave}%`}</div>
-          <div>Pendle PT 收益 放大后: {`${amplifiedPendle}%`}</div>
-
-          <div style={{ marginTop: 12 }}>
-            <h4>净放大收益示例</h4>
-            <div>放大后 Pendle 收益 (Gross): {`${grossPendle}%`}</div>
-            <div>放大后的借款成本 (Borrow cost): {`${totalBorrowCost}%`}</div>
-            <div style={{ marginTop: 6, fontWeight: '600' }}>估计净收益 (Approx. net yield on equity): {`${netLeveragedYield}%`}</div>
-            <div style={{ marginTop: 8, color: '#ffb86b' }}>
-              风险提示：该计算为简化估算，未考虑手续费、借贷利率波动、清算风险与融资费用。实际策略更复杂，请谨慎评估风险。
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 20, textAlign: 'left' }}>
-        <h3>模拟 Pendle 市场数据（仅示例）</h3>
-        <div style={{ marginBottom: 8 }}>
-          <label>选择情景: </label>
-          <select value={selectedScenario} onChange={e => setSelectedScenario(e.target.value)}>
-            {PENDLE_SCENARIOS.map(s => (
-              <option key={s.id} value={s.id}>{s.label}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <strong>模拟指标</strong>
-          <div>PT 年化收益 (模拟): {PENDLE_SCENARIOS.find(x => x.id === selectedScenario).ptYield}%</div>
-          <div>pt-sUSDE 年化收益 (模拟): {PENDLE_SCENARIOS.find(x => x.id === selectedScenario).ptSdsdeYield}%</div>
-          <div style={{ marginTop: 8, color: 'var(--muted)' }}>
-            说明：这些数据为本地模拟示例，不会访问 Pendle 合约。你可以在上方修改“Pendle PT 基础年化收益率”以进行自定义模拟。
-          </div>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 20, textAlign: 'left' }}>
-        <h3>测试合约交互（链上 Mock 合约）</h3>
-        <div>Faucet 合约: {faucetAddr}</div>
-        <div>MockUSDC 合约: {mockUSDCAddr || '加载中...'}</div>
-        <div>Mock PT-sUSDE 合约: {mockPtAddr || '加载中...'}</div>
-
-        <div style={{ marginTop: 12 }}>
-          <button onClick={callFaucet} disabled={loading || !signer}>从 Faucet 获取测试代币 (faucet)</button>
-          <button onClick={fetchTokenBalances} style={{ marginLeft: 12 }} disabled={loading || !account}>刷新代币余额</button>
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <div>账户余额:</div>
-          <div>MockUSDC: {balances.mockUSDC == null ? '—' : balances.mockUSDC}</div>
-          <div>Mock PT-sUSDE: {balances.mockPT == null ? '—' : balances.mockPT}</div>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 20, textAlign: 'left' }}>
-        <h3>你的 PIV 合约</h3>
-        <div>Router 合约: {routerAddr}</div>
-        <div style={{ marginTop: 8 }}>
-          {userPivAddr ? (
-            <div>
-              已存在 PIV: <a href={`https://etherscan.io/address/${userPivAddr}`} target="_blank" rel="noreferrer">{userPivAddr}</a>
-              <div style={{ marginTop: 6 }}>
-                <button onClick={fetchUserPiv} disabled={loading}>刷新 PIV 地址</button>
-              </div>
-            </div>
-          ) : (
-            <div>
-              未检测到 PIV 合约
-              <div style={{ marginTop: 8 }}>
-                <button onClick={deployPivOnChain} disabled={deploying || !signer}>在链上创建 PIV (调用 Router.deployPIV)</button>
-                <button onClick={fetchUserPiv} style={{ marginLeft: 12 }} disabled={loading}>刷新</button>
-                <button onClick={diagnosePivMapping} style={{ marginLeft: 12 }} disabled={loading}>诊断 PIV 映射</button>
-              </div>
-              <div style={{ marginTop: 8, color: 'var(--muted)' }}>
-                注意：部署会发起链上交易，需要支付矿工费，且会将你的地址作为 PIV 的所有者。
-              </div>
-            </div>
-          )}
-        </div>
-        {diagInfo && (
-          <div style={{ marginTop: 12, background: 'rgba(255,255,255,0.01)', padding: 10, borderRadius: 8 }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>诊断信息</div>
-            <div>chainId: {diagInfo.chainId}</div>
-            <div>Router 合约代码存在: {diagInfo.routerCode && diagInfo.routerCode !== '0x' ? '是' : '否'}</div>
-            <div>userPivMapping: {diagInfo.mapping || '无映射 (null)'}</div>
-            <div style={{ marginTop: 6 }}>最近 PIVDeployed 事件: {diagInfo.events.length}</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-              说明：若 Router 合约代码为空或 chainId 不正确，请检查钱包网络是否与部署网络一致；若 events 中存在你地址对应的 owner，则可参考事件返回的 piv 地址。
-            </div>
-          </div>
-        )}
-      </div>
 
       {error && (
         <div style={{ marginTop: 16, color: '#ff8b8b' }}>错误: {error}</div>
       )}
-
-      <p style={{ marginTop: 18, color: 'var(--muted)' }}>
-        说明: 本页面从指定的 Aave Pool 获取 USDC 的当前可变借款利率 (若 Aave 使用 Ray 单位，则会按 1e27 转换为年化比例)。Pendle 的 PT 收益需手动填写。杠杆放大采用简单乘法进行示意计算，实际杠杆策略需考虑借款成本、费用与清算风险。
-      </p>
     </div>
   )
 }

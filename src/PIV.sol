@@ -127,6 +127,8 @@ contract PIV is IAaveV3FlashLoanReceiver, Ownable, EIP712, IPIV, ReentrancyGuard
         Position memory position = positionMapping[positionId];
         position.expectProfit = expectProfit;
         position.deadline = deadline;
+        // persist updated fields back to storage
+        positionMapping[positionId] = position;
         emit PositionUpdated(positionId, expectProfit, deadline);
     }
 

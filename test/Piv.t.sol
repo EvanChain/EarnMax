@@ -8,6 +8,8 @@ import {IPIV, Position} from "../src/IPIV.sol";
 import {MockAavePool} from "../src/test/MockAavePool.sol";
 import {MockAToken} from "../src/test/MockAToken.sol";
 import {MockERC20} from "../src/test/MockERC20.sol";
+import {MockSwapAdapter} from "../src/test/MockSwapAdapter.sol";
+import {SwapUnit} from "../src/interfaces/IERC20SwapAdapter.sol";
 
 contract PIVTest is Test {
     MockAavePool internal pool;
@@ -218,5 +220,66 @@ contract PIVTest is Test {
         assertEq(afterPos.debtAmount, beforePos.debtAmount - int256(debtInput));
         assertEq(afterPos.expectProfit, beforePos.expectProfit - debtInput);
         assertEq(afterPos.collateralAmount, beforePos.collateralAmount - collateralOutput);
+    }
+
+    function test_createPosition_createsPositionAndSuppliesToAave() public {
+        // deploy a mock swap adapter
+        MockSwapAdapter adapter = new MockSwapAdapter();
+
+        // prepare a new position
+        Position memory position;
+        position.collateralToken = address(weth);
+        position.collateralAmount = collateralAmount; // expect to receive this much collateral
+        position.debtToken = address(usdc);
+        position.debtAmount = int256(500e6); // flashloan amount
+        position.principal = 0;
+        position.interestRateMode = interestRateMode;
+        position.expectProfit = 0;
+        position.deadline = 0;
+
+        uint256 loanAmt = uint256(position.debtAmount);
+
+        // ensure the pool has enough of the debt token and approve PIV to pull tokenIn during swap
+        usdc.mint(address(pool), loanAmt);
+        vm.prank(address(pool));
+        usdc.approve(address(piv), loanAmt * 2);
+
+        // construct swap units to convert debtToken -> collateralToken
+        SwapUnit[] memory units = new SwapUnit[](1);
+        units[0] = SwapUnit({adapter: address(adapter), tokenIn: address(usdc), tokenOut: address(weth), swapData: abi.encode(collateralAmount)});
+
+        // call createPosition as the owner (user)
+        vm.prank(user);
+        uint256 posId = piv.createPosition(position, false, units);
+
+        // position id and totalPositions should increment
+        assertEq(posId, 1);
+        assertEq(piv.totalPositions(), 1);
+
+        // verify PIV holds the aToken minted by the pool equal to the collateral supplied
+        address aTokenAddr = pool.getReserveData(address(weth)).aTokenAddress;
+        assertEq(aTokenAddr, address(aWeth));
+        assertEq(aWeth.balanceOf(address(piv)), collateralAmount);
+
+        // compute expected debt (amount + premium)
+        uint256 premium = (uint256(pool.FLASHLOAN_PREMIUM_TOTAL()) * loanAmt) / 10000;
+        uint256 expectedDebt = loanAmt + premium;
+
+        // verify stored position debt equals amount + premium
+        (
+            address collateralToken0,
+            uint256 collateralAmount0,
+            address debtToken0,
+            int256 debtAmount0,
+            uint256 principal0,
+            uint256 interestRateMode0,
+            uint256 expectProfit0,
+            uint256 deadline0
+        ) = piv.positionMapping(1);
+
+        assertEq(uint256(debtAmount0), expectedDebt);
+
+        // verify the pool recorded the borrow on behalf of PIV
+        assertEq(pool.userDebt(address(piv), address(usdc)), expectedDebt);
     }
 }

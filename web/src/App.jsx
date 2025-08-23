@@ -52,11 +52,13 @@ export default function App() {
   const [loanInterestMode, setLoanInterestMode] = useState(2)
   const [loanDeadlineHours, setLoanDeadlineHours] = useState(1)
   const [loanSubmitting, setLoanSubmitting] = useState(false)
+  const [loanApproving, setLoanApproving] = useState(false)
   const [loanTargetTokenPair, setLoanTargetTokenPair] = useState({ from: null, to: null })
   const [loanUseDeadlineDate, setLoanUseDeadlineDate] = useState(false)
   const [loanDeadlineDatetime, setLoanDeadlineDatetime] = useState('') // ISO-like local datetime string
   const [loanUseClosePrice, setLoanUseClosePrice] = useState(false)
   const [loanClosePriceInput, setLoanClosePriceInput] = useState('')
+  const [principalAllowance, setPrincipalAllowance] = useState('0')
 
   // Pricing / protocol limits used to compute amounts for the form
   const PT_PRICE_USDC = 0.8 // price of 1 PT in USDC
@@ -290,6 +292,53 @@ export default function App() {
     }
   }
 
+  // Check USDC allowance for PIV contract
+  async function checkPrincipalAllowance() {
+    if (!signer || !account || !mockUSDCAddr) return
+    try {
+      const targetPivAddr = userPivAddr || PIV_FIXED_ADDR
+      const usdcContract = new ethers.Contract(mockUSDCAddr, erc20Abi, signer)
+      const allowance = await usdcContract.allowance(account, targetPivAddr)
+      setPrincipalAllowance(ethers.utils.formatUnits(allowance, 6)) // USDC has 6 decimals
+    } catch (e) {
+      console.error('checkPrincipalAllowance error', e)
+    }
+  }
+
+  // Approve USDC for PIV contract
+  async function approvePrincipal() {
+    if (!signer || !mockUSDCAddr) {
+      setError('请先连接钱包')
+      return
+    }
+    
+    const principalNum = Number(loanPrincipalInput || '0')
+    if (!(principalNum > 0)) {
+      setError('请输入有效的本金金额')
+      return
+    }
+
+    setLoanApproving(true)
+    setError(null)
+    try {
+      const targetPivAddr = userPivAddr || PIV_FIXED_ADDR
+      const usdcContract = new ethers.Contract(mockUSDCAddr, erc20Abi, signer)
+      const principalAmount = ethers.utils.parseUnits(principalNum.toFixed(6), 6)
+      
+      const tx = await usdcContract.approve(targetPivAddr, principalAmount)
+      await tx.wait()
+      
+      // refresh allowance
+      await checkPrincipalAllowance()
+      setError(`USDC 授权成功 (交易哈希: ${tx.hash})`)
+    } catch (e) {
+      console.error('approvePrincipal error', e)
+      setError('USDC 授权失败：' + (e.message || e.toString()))
+    } finally {
+      setLoanApproving(false)
+    }
+  }
+
   async function createLoan(token) {
     // Open form so user can choose amounts for USDC -> PT-sUSDE
     if (!signer) {
@@ -307,6 +356,8 @@ export default function App() {
     setLoanSelectedLeverage(3)
     setLoanInterestMode(2)
     setLoanDeadlineHours(1)
+    // check current allowance
+    await checkPrincipalAllowance()
     setShowLoanForm(true)
   }
 
@@ -315,6 +366,15 @@ export default function App() {
       setError('请先连接钱包')
       return
     }
+    
+    const principalNum = Number(loanPrincipalInput || '0')
+    const allowanceNum = Number(principalAllowance || '0')
+    
+    if (allowanceNum < principalNum) {
+      setError('USDC 授权不足，请先授权本金金额')
+      return
+    }
+    
     setLoanSubmitting(true)
     setError(null)
     try {
@@ -332,7 +392,6 @@ export default function App() {
       // parse user inputs: principal (USDC) + leverage -> compute debt (USDC) and collateral (PT)
       const collateralDecimals = 18
       const debtDecimals = 6
-      const principalNum = Number(loanPrincipalInput || '0')
       const L = Number(loanSelectedLeverage || 1)
 
       if (!(principalNum > 0) || !(L >= 1)) {
@@ -407,7 +466,7 @@ export default function App() {
         collateralAmount: collateralAmount.toString(),
         debtToken: loanTargetTokenPair.from,
         debtAmount: debtAmount.toString(),
-        principal: '0',
+        principal: ethers.utils.parseUnits(principalNum.toFixed(debtDecimals), debtDecimals).toString(),
         interestRateMode: loanInterestMode,
         expectProfit: expectProfitBN.toString(),
         deadline: deadlineTs
@@ -418,6 +477,9 @@ export default function App() {
       await tx.wait()
       setError('杠杆交易已提交（交易哈希: ' + tx.hash + '）')
       setShowLoanForm(false)
+      // refresh balances and allowance
+      await fetchTokenBalances()
+      await checkPrincipalAllowance()
     } catch (e) {
       console.error('submitCreateLoan error', e)
       setError('创建杠杆贷款失败：' + (e.message || e.toString()))
@@ -613,72 +675,173 @@ export default function App() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
           <div style={{ background: 'white', color: 'black', padding: 18, borderRadius: 8, width: 420, maxWidth: '95%' }}>
             <h3 style={{ marginTop: 0 }}>创建杠杆贷款 — USDC → PT-sUSDE</h3>
-            <div style={{ marginBottom: 8 }}>
-              <label>本金 (USDC)</label>
-              <input value={loanPrincipalInput} onChange={e => setLoanPrincipalInput(e.target.value)} style={{ width: '100%', marginTop: 6, padding: 8 }} />
-            </div>
-            <div style={{ marginBottom: 8 }}>
-              <label>杠杆倍率</label>
-              <input type="number" value={loanSelectedLeverage} onChange={e => setLoanSelectedLeverage(Number(e.target.value))} style={{ width: '100%', marginTop: 6, padding: 8 }} />
-            </div>
-            <div style={{ marginBottom: 8 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" checked={loanUseClosePrice} onChange={e => setLoanUseClosePrice(e.target.checked)} /> 设定平仓价格 (USDC / PT)
-              </label>
-              {loanUseClosePrice && (
-                <input value={loanClosePriceInput} onChange={e => setLoanClosePriceInput(e.target.value)} placeholder="例如: 200 (表示 200 USDC 每 1 PT)" style={{ width: '100%', marginTop: 6, padding: 8 }} />
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              <div style={{ flex: 1 }}>
-                <label>利率模式</label>
-                <select value={loanInterestMode} onChange={e => setLoanInterestMode(Number(e.target.value))} style={{ width: '100%', padding: 8, marginTop: 6 }}>
-                  <option value={1}>Stable (1)</option>
-                  <option value={2}>Variable (2)</option>
-                </select>
-              </div>
-              <div style={{ width: 140 }}>
-                <label>有效期 (小时)</label>
-                <input type="number" value={loanDeadlineHours} onChange={e => setLoanDeadlineHours(Number(e.target.value))} style={{ width: '100%', padding: 8, marginTop: 6 }} />
-              </div>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" checked={loanUseDeadlineDate} onChange={e => setLoanUseDeadlineDate(e.target.checked)} /> 最晚到期时间
-              </label>
-              {loanUseDeadlineDate && (
-                <input type="datetime-local" value={loanDeadlineDatetime} onChange={e => setLoanDeadlineDatetime(e.target.value)} style={{ width: '100%', marginTop: 6, padding: 8 }} />
-              )}
-            </div>
-            {/* display computed expectProfit if close price enabled */}
-            {loanUseClosePrice && loanClosePriceInput && (
-              <div style={{ marginBottom: 12, color: '#374151' }}>
-                预估 expectProfit: {(() => {
-                  try {
-                    const debtDecimals = 6
-                    const collateralDecimals = 18
-                    const coll = ethers.utils.parseUnits(loanPrincipalInput || '0', collateralDecimals)
-                    const closePriceScaled = ethers.utils.parseUnits(loanClosePriceInput.trim(), debtDecimals)
-                    const collateralScale = ethers.BigNumber.from(10).pow(collateralDecimals)
-                    const valueInDebt = coll.mul(closePriceScaled).div(collateralScale)
-                    const debt = ethers.utils.parseUnits(loanPrincipalInput || '0', debtDecimals)
-                    const expectBN = valueInDebt.gt(debt) ? valueInDebt.sub(debt) : ethers.BigNumber.from(0)
-                    return ethers.utils.formatUnits(expectBN, debtDecimals) + ' USDC'
-                  } catch (e) {
-                    return '—'
-                  }
-                })()}</div>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button onClick={cancelLoanForm} disabled={loanSubmitting} style={{ padding: '8px 12px' }}>取消</button>
-              <button onClick={submitCreateLoan} disabled={loanSubmitting} style={{ padding: '8px 12px', background: '#f59e0b', color: 'white', border: 'none' }}>{loanSubmitting ? '提交中...' : '确认并提交'}</button>
-            </div>
-          </div>
-        </div>
-      )}
+            
+            {/* 计算预览区域 */}
+            {(() => {
+              const principalNum = Number(loanPrincipalInput || '0')
+              const L = Number(loanSelectedLeverage || 1)
+              if (principalNum > 0 && L >= 1) {
+                const debtNum = principalNum * (L - 1)
+                const totalPositionValueUSDC = principalNum * L
+                const requiredCollateralValueUSDC = debtNum / AAVE_LTV_LIMIT
+                const collateralValueUSDC = Math.max(totalPositionValueUSDC, requiredCollateralValueUSDC)
+                const collateralPT = collateralValueUSDC / PT_PRICE_USDC
+                const currentRate = aaveRate == null ? simulatedAaveRate : aaveRate
+                const grossYield = 14.0 * L // PT-sUSDE base yield * leverage
+                const borrowCost = currentRate * (L - 1)
+                const netYield = grossYield - borrowCost
+                
+                return (
+                  <div style={{ background: '#f8f9fa', padding: 12, borderRadius: 6, marginBottom: 12 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8, color: '#374151' }}>计算预览</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 13 }}>
+                      <div>本金 (USDC): <strong>{principalNum.toFixed(2)}</strong></div>
+                      <div>杠杆倍率: <strong>{L}x</strong></div>
+                      <div>借款 (USDC): <strong>{debtNum.toFixed(2)}</strong></div>
+                      <div>抵押 (PT): <strong>{collateralPT.toFixed(4)}</strong></div>
+                      <div>抵押价值 (USDC): <strong>{collateralValueUSDC.toFixed(2)}</strong></div>
+                      <div>总仓位价值 (USDC): <strong>{totalPositionValueUSDC.toFixed(2)}</strong></div>
+                    </div>
+                    <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 8, marginTop: 8 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, fontSize: 13 }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ color: '#10b981', fontWeight: 700 }}>{grossYield.toFixed(2)}%</div>
+                          <div style={{ color: '#6b7280' }}>放大收益</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ color: '#ef4444', fontWeight: 700 }}>{borrowCost.toFixed(2)}%</div>
+                          <div style={{ color: '#6b7280' }}>借款成本</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ color: netYield >= 0 ? '#10b981' : '#ef4444', fontWeight: 700 }}>{netYield.toFixed(2)}%</div>
+                          <div style={{ color: '#6b7280' }}>净收益</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
+              return null
+            })()}
 
-      {/* ...existing UI (rest of the page) ... */}
+            {/* USDC 授权状态 */}
+            <div style={{ marginBottom: 12, padding: 10, background: '#f0f9ff', borderRadius: 6, border: '1px solid #e0f2fe' }}>
+              <div style={{ fontSize: 13, color: '#374151' }}>
+                USDC 授权余额: <strong>{Number(principalAllowance).toFixed(2)}</strong>
+                {Number(principalAllowance) < Number(loanPrincipalInput || '0') && (
+                  <span style={{ color: '#ef4444', marginLeft: 8 }}>⚠️ 授权不足</span>
+                )}
+              </div>
+              <button 
+                onClick={approvePrincipal} 
+                disabled={loanApproving || !loanPrincipalInput || Number(loanPrincipalInput) <= 0} 
+                style={{ 
+                  marginTop: 6, 
+                  padding: '6px 12px', 
+                  background: loanApproving ? '#9ca3af' : '#10b981', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: 4,
+                  cursor: loanApproving ? 'not-allowed' : 'pointer',
+                  fontSize: 12
+                }}
+              >
+                {loanApproving ? '授权中...' : '授权 USDC'}
+              </button>
+            </div>
 
+             <div style={{ marginBottom: 8 }}>
+               <label>本金 (USDC)</label>
+              <input 
+                type="number" 
+                value={loanPrincipalInput} 
+                onChange={e => setLoanPrincipalInput(e.target.value)} 
+                placeholder="输入本金数量" 
+                style={{ width: '100%', marginTop: 6, padding: 8 }} 
+              />
+             </div>
+             <div style={{ marginBottom: 8 }}>
+               <label>杠杆倍率</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                <input 
+                  type="range" 
+                  min="1" 
+                  max="9" 
+                  step="0.5" 
+                  value={loanSelectedLeverage} 
+                  onChange={e => setLoanSelectedLeverage(Number(e.target.value))} 
+                  style={{ flex: 1 }} 
+                />
+                <div style={{ fontWeight: 700, minWidth: 40 }}>{loanSelectedLeverage}x</div>
+              </div>
+             </div>
+             <div style={{ marginBottom: 8 }}>
+               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                 <input type="checkbox" checked={loanUseClosePrice} onChange={e => setLoanUseClosePrice(e.target.checked)} /> 设定平仓价格 (USDC / PT)
+               </label>
+               {loanUseClosePrice && (
+                 <input value={loanClosePriceInput} onChange={e => setLoanClosePriceInput(e.target.value)} placeholder="例如: 200 (表示 200 USDC 每 1 PT)" style={{ width: '100%', marginTop: 6, padding: 8 }} />
+               )}
+             </div>
+             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+               <div style={{ flex: 1 }}>
+                 <label>利率模式</label>
+                 <select value={loanInterestMode} onChange={e => setLoanInterestMode(Number(e.target.value))} style={{ width: '100%', padding: 8, marginTop: 6 }}>
+                   <option value={1}>Stable (1)</option>
+                   <option value={2}>Variable (2)</option>
+                 </select>
+               </div>
+               <div style={{ width: 140 }}>
+                 <label>有效期 (小时)</label>
+                 <input type="number" value={loanDeadlineHours} onChange={e => setLoanDeadlineHours(Number(e.target.value))} style={{ width: '100%', padding: 8, marginTop: 6 }} />
+               </div>
+             </div>
+             <div style={{ marginBottom: 12 }}>
+               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                 <input type="checkbox" checked={loanUseDeadlineDate} onChange={e => setLoanUseDeadlineDate(e.target.checked)} /> 最晚到期时间
+               </label>
+               {loanUseDeadlineDate && (
+                 <input type="datetime-local" value={loanDeadlineDatetime} onChange={e => setLoanDeadlineDatetime(e.target.value)} style={{ width: '100%', marginTop: 6, padding: 8 }} />
+               )}
+             </div>
+             {/* display computed expectProfit if close price enabled */}
+             {loanUseClosePrice && loanClosePriceInput && (
+               <div style={{ marginBottom: 12, color: '#374151' }}>
+                 预估 expectProfit: {(() => {
+                   try {
+                     const debtDecimals = 6
+                     const collateralDecimals = 18
+                     const coll = ethers.utils.parseUnits(loanPrincipalInput || '0', collateralDecimals)
+                     const closePriceScaled = ethers.utils.parseUnits(loanClosePriceInput.trim(), debtDecimals)
+                     const collateralScale = ethers.BigNumber.from(10).pow(collateralDecimals)
+                     const valueInDebt = coll.mul(closePriceScaled).div(collateralScale)
+                     const debt = ethers.utils.parseUnits(loanPrincipalInput || '0', debtDecimals)
+                     const expectBN = valueInDebt.gt(debt) ? valueInDebt.sub(debt) : ethers.BigNumber.from(0)
+                     return ethers.utils.formatUnits(expectBN, debtDecimals) + ' USDC'
+                   } catch (e) {
+                     return '—'
+                   }
+                 })()}</div>
+             )}
+             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+               <button onClick={cancelLoanForm} disabled={loanSubmitting} style={{ padding: '8px 12px' }}>取消</button>
+              <button 
+                onClick={submitCreateLoan} 
+                disabled={loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')} 
+                style={{ 
+                  padding: '8px 12px', 
+                  background: (loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')) ? '#9ca3af' : '#f59e0b', 
+                  color: 'white', 
+                  border: 'none',
+                  cursor: (loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {loanSubmitting ? '提交中...' : '确认并提交'}
+              </button>
+             </div>
+           </div>
+         </div>
+       )}
 
       {error && (
         <div style={{ marginTop: 16, color: '#ff8b8b' }}>错误: {error}</div>

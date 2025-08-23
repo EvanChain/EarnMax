@@ -1,0 +1,197 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "router_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "defaultApprox",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "guessMin",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "guessMax",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "guessOffchain",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxIteration",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "eps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "emptyLimit",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "limitRouter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "epsSkipMarket",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "optData",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "emptySwap",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "swapType",
+        "type": "uint8",
+        "internalType": "enum SwapType"
+      },
+      {
+        "name": "extRouter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "extCalldata",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "needScale",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "router",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IPAllActionV3"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "swap",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenInAmt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "swapData",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "error",
+    "name": "ExceedMaxTokenIn",
+    "inputs": [
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LessThanMinTokenOut",
+    "inputs": [
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OnlyCallableThroughProxy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  }
+]

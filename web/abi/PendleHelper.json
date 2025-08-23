@@ -1,0 +1,86 @@
+[
+  {
+    "type": "function",
+    "name": "defaultApprox",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "guessMin",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "guessMax",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "guessOffchain",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxIteration",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "eps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "emptyLimit",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "limitRouter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "epsSkipMarket",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "optData",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "emptySwap",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "swapType",
+        "type": "uint8",
+        "internalType": "enum SwapType"
+      },
+      {
+        "name": "extRouter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "extCalldata",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "needScale",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  }
+]

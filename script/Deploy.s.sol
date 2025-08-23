@@ -64,11 +64,9 @@ contract DeployScript is Script {
         vm.stopBroadcast();
 
         // write to deployments file
-        string memory deploymentsFile = string.concat(
-            vm.projectRoot(),
-            "/deployments/", vm.envString("CHAIN_ID"),
-            ".txt"
-        );
+        string memory deploymentsFile =
+            string.concat(vm.projectRoot(), "/deployments/", vm.toString(block.chainid), ".txt");
+
         console.log("Writing deployments to:", deploymentsFile);
         vm.writeFile(deploymentsFile, "");
         vm.writeLine(deploymentsFile, string.concat("Faucet=", vm.toString(address(faucet))));

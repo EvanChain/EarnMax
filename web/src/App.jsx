@@ -546,6 +546,9 @@ export default function App() {
     return m
   })
 
+  // Show balance page state
+  const [showBalancePage, setShowBalancePage] = useState(false)
+
   function updateTokenLeverage(symbol, val) {
     setTokenLeverages(prev => ({ ...prev, [symbol]: val }))
   }
@@ -591,6 +594,11 @@ export default function App() {
           {/* Faucet button moved to top bar for convenience */}
           <button onClick={callFaucet} disabled={loading || !signer} style={{ padding: '8px 12px', borderRadius: 8, background: '#10b981', color: 'white', border: 'none', cursor: signer ? 'pointer' : 'not-allowed' }}>领取 Faucet</button>
 
+          {/* Balance page toggle button */}
+          <button onClick={() => setShowBalancePage(!showBalancePage)} style={{ padding: '8px 12px', borderRadius: 8, background: '#6366f1', color: 'white', border: 'none', cursor: 'pointer' }}>
+            {showBalancePage ? '返回首页' : '查看余额'}
+          </button>
+
           <div style={{ width: 1, height: 28, background: 'rgba(255,255,255,0.03)' }} />
 
           <div style={{ textAlign: 'right' }}>
@@ -615,75 +623,211 @@ export default function App() {
         </div>
       </div>
 
-      {/* Dex-style header + token list */}
-      <div style={{
-        background: 'linear-gradient(90deg, rgba(124,58,237,0.12), rgba(59,130,246,0.06))',
-        padding: 18,
-        borderRadius: 12,
-        marginBottom: 18
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h1 style={{ margin: 0 }}>EarnMax</h1>
-            <div style={{ color: 'var(--muted)', marginTop: 6 }}>快速查看多种资产在不同杠杆下的示例年化收益，仅供参考。</div>
+      {showBalancePage ? (
+        /* Balance Page */
+        <div style={{
+          background: 'linear-gradient(90deg, rgba(124,58,237,0.12), rgba(59,130,246,0.06))',
+          padding: 18,
+          borderRadius: 12,
+          marginBottom: 18
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+            <div>
+              <h1 style={{ margin: 0 }}>测试代币余额</h1>
+              <div style={{ color: 'var(--muted)', marginTop: 6 }}>查看您账户中的测试代币余额</div>
+            </div>
+            <button 
+              onClick={fetchTokenBalances} 
+              disabled={loading || !account} 
+              style={{ 
+                padding: '8px 16px', 
+                borderRadius: 8, 
+                background: loading ? '#9ca3af' : '#10b981', 
+                color: 'white', 
+                border: 'none', 
+                cursor: loading ? 'not-allowed' : 'pointer' 
+              }}
+            >
+              {loading ? '刷新中...' : '刷新余额'}
+            </button>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ color: 'var(--muted)' }}>Aave 借出利率</div>
-            <div style={{ fontWeight: 700, fontSize: 18 }}>{aaveRate == null ? `${simulatedAaveRate}%` : `${aaveRate}%`}</div>
-          </div>
-        </div>
 
-        <div style={{ marginTop: 18 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-            {SIM_TOKENS.map(token => {
-              const L = tokenLeverages[token.symbol] || 1
-              const { gross, cost, net } = calcNetYield(token.baseYield, L, aaveRate == null ? simulatedAaveRate : aaveRate)
-              return (
-                <div key={token.symbol} style={{ background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <div style={{ fontWeight: 700 }}>{token.symbol}</div>
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>{token.name}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>基础年化</div>
-                      <div style={{ fontWeight: 700 }}>{token.baseYield}%</div>
-                    </div>
+          {!account ? (
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
+              请先连接钱包以查看余额
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+              {/* MockUSDC Balance Card */}
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: 18, borderRadius: 12, border: '1px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 18 }}>MockUSDC</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>测试用 USDC 代币</div>
                   </div>
-
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>杠杆</div>
-                      <div style={{ fontWeight: 700 }}>{L}x</div>
-                    </div>
-                    <input type="range" min="1" max="9" step="0.5" value={L} onChange={e => updateTokenLeverage(token.symbol, Number(e.target.value))} style={{ width: '100%', marginTop: 8 }} />
-                  </div>
-
-                  <div style={{ marginTop: 10, borderTop: '1px solid rgba(255,255,255,0.02)', paddingTop: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>放大后收益 (Gross)</div>
-                      <div style={{ fontWeight: 700 }}>{gross}%</div>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>借款成本</div>
-                      <div style={{ color: '#ff7b7b', fontWeight: 700 }}>{cost}%</div>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>估计净收益</div>
-                      <div style={{ color: net >= 0 ? '#7ee787' : '#ff8b8b', fontWeight: 900 }}>{net}%</div>
-                    </div>
-
-                    {/* 新增：杠杆按钮（调用固定 PIV 合约创建 loan） */}
-                    <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-                      <button onClick={() => createLoan(token)} disabled={!signer || loading} style={{ padding: '8px 10px', borderRadius: 8, background: 'linear-gradient(90deg,#f59e0b,#f97316)', color: 'white', border: 'none', cursor: 'pointer' }}>杠杆</button>
-                    </div>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700 }}>
+                    U
                   </div>
                 </div>
-              )
-            })}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 24, fontWeight: 900 }}>
+                    {balances.mockUSDC != null ? balances.mockUSDC.toFixed(2) : '—'}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>USDC</div>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                  合约地址: {mockUSDCAddr ? shortAddress(mockUSDCAddr) : '加载中...'}
+                </div>
+                {mockUSDCAddr && (
+                  <a 
+                    href={`https://etherscan.io/address/${mockUSDCAddr}`} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    style={{ fontSize: 12, color: '#60a5fa', textDecoration: 'none' }}
+                  >
+                    在 Etherscan 查看 →
+                  </a>
+                )}
+              </div>
+
+              {/* MockPT Balance Card */}
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: 18, borderRadius: 12, border: '1px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 18 }}>Mock PT-sUSDE</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>测试用 Pendle PT 代币</div>
+                  </div>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700 }}>
+                    PT
+                  </div>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 24, fontWeight: 900 }}>
+                    {balances.mockPT != null ? balances.mockPT.toFixed(4) : '—'}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>PT</div>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                  合约地址: {mockPtAddr ? shortAddress(mockPtAddr) : '加载中...'}
+                </div>
+                {mockPtAddr && (
+                  <a 
+                    href={`https://etherscan.io/address/${mockPtAddr}`} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    style={{ fontSize: 12, color: '#60a5fa', textDecoration: 'none' }}
+                  >
+                    在 Etherscan 查看 →
+                  </a>
+                )}
+              </div>
+
+              {/* Faucet Info Card */}
+              <div style={{ background: 'rgba(16,185,129,0.05)', padding: 18, borderRadius: 12, border: '1px solid rgba(16,185,129,0.2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 18, color: '#10b981' }}>Faucet</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>获取测试代币</div>
+                  </div>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700 }}>
+                    🚰
+                  </div>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 14, marginBottom: 8 }}>
+                    点击顶部 "领取 Faucet" 按钮可获得：
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    • MockUSDC: 用于杠杆交易本金<br/>
+                    • Mock PT-sUSDE: 测试用抵押品
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                  Faucet 合约: {shortAddress(faucetAddr)}
+                </div>
+                <a 
+                  href={`https://etherscan.io/address/${faucetAddr}`} 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  style={{ fontSize: 12, color: '#10b981', textDecoration: 'none' }}
+                >
+                  在 Etherscan 查看 →
+                </a>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* Main Page - Dex-style header + token list */
+        <div style={{
+          background: 'linear-gradient(90deg, rgba(124,58,237,0.12), rgba(59,130,246,0.06))',
+          padding: 18,
+          borderRadius: 12,
+          marginBottom: 18
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h1 style={{ margin: 0 }}>EarnMax</h1>
+              <div style={{ color: 'var(--muted)', marginTop: 6 }}>快速查看多种资产在不同杠杆下的示例年化收益，仅供参考。</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ color: 'var(--muted)' }}>Aave 借出利率</div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>{aaveRate == null ? `${simulatedAaveRate}%` : `${aaveRate}%`}</div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              {SIM_TOKENS.map(token => {
+                const L = tokenLeverages[token.symbol] || 1
+                const { gross, cost, net } = calcNetYield(token.baseYield, L, aaveRate == null ? simulatedAaveRate : aaveRate)
+                return (
+                  <div key={token.symbol} style={{ background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontWeight: 700 }}>{token.symbol}</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>{token.name}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>基础年化</div>
+                        <div style={{ fontWeight: 700 }}>{token.baseYield}%</div>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>杠杆</div>
+                        <div style={{ fontWeight: 700 }}>{L}x</div>
+                      </div>
+                      <input type="range" min="1" max="9" step="0.5" value={L} onChange={e => updateTokenLeverage(token.symbol, Number(e.target.value))} style={{ width: '100%', marginTop: 8 }} />
+                    </div>
+
+                    <div style={{ marginTop: 10, borderTop: '1px solid rgba(255,255,255,0.02)', paddingTop: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>放大后收益 (Gross)</div>
+                        <div style={{ fontWeight: 700 }}>{gross}%</div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>借款成本</div>
+                        <div style={{ color: '#ff7b7b', fontWeight: 700 }}>{cost}%</div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>估计净收益</div>
+                        <div style={{ color: net >= 0 ? '#7ee787' : '#ff8b8b', fontWeight: 900 }}>{net}%</div>
+                      </div>
+
+                      {/* 新增：杠杆按钮（调用固定 PIV 合约创建 loan） */}
+                      <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+                        <button onClick={() => createLoan(token)} disabled={!signer || loading} style={{ padding: '8px 10px', borderRadius: 8, background: 'linear-gradient(90deg,#f59e0b,#f97316)', color: 'white', border: 'none', cursor: 'pointer' }}>杠杆</button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Loan creation modal/form */}
       {showLoanForm && (

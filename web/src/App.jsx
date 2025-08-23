@@ -401,7 +401,7 @@ export default function App() {
       }
 
       // Compute amounts in human units
-      const debtNum = principalNum * (L - 1) // amount to borrow in USDC
+      const debtNum = principalNum * (L - 1) // amount to borrow in USDC (this is the flashloan amount)
       const totalPositionValueUSDC = principalNum * L // total position value in USDC
       // required collateral value (in USDC) to support the borrow under Aave LTV
       const requiredCollateralValueUSDC = debtNum / AAVE_LTV_LIMIT
@@ -409,11 +409,20 @@ export default function App() {
       const collateralValueUSDC = Math.max(totalPositionValueUSDC, requiredCollateralValueUSDC)
       const collateralPT = collateralValueUSDC / PT_PRICE_USDC
 
-      const debtAmount = ethers.utils.parseUnits(debtNum.toFixed(debtDecimals), debtDecimals)
+      // Step 1: Prepare position data (PIV will pull principal via transferFrom)
+      const principalAmount = ethers.utils.parseUnits(principalNum.toFixed(debtDecimals), debtDecimals)
+      const debtAmount = ethers.utils.parseUnits(debtNum.toFixed(debtDecimals), debtDecimals) // This is flashloan amount, not total
       const collateralAmount = ethers.utils.parseUnits(collateralPT.toFixed(collateralDecimals), collateralDecimals)
 
-      if (collateralAmount.lte(0) || debtAmount.lte(0)) {
-        setError('请输入有效的抵押和借款金额')
+      if (collateralAmount.lte(0)) {
+        setError('请输入有效的抵押金额')
+        setLoanSubmitting(false)
+        return
+      }
+      
+      // For 1x leverage, no debt is needed (debtAmount can be 0)
+      if (L === 1 && debtAmount.gt(0)) {
+        setError('1x 杠杆不需要借款，请检查杠杆设置')
         setLoanSubmitting(false)
         return
       }
@@ -450,8 +459,10 @@ export default function App() {
         }
       }
 
+      // Step 2: Prepare swap data (MockSwapAdapter expects abi.encode(uint256))
       const MOCK_SWAP_ADAPTER = '0x4de3ff522822292e64ece306CFdeE6f5009D3BB8'
-      const swapData = ethers.utils.defaultAbiCoder.encode(['uint256'], [collateralAmount.toString()])
+      const swapData = ethers.utils.defaultAbiCoder.encode(['uint256'], [collateralAmount])
+      
       const swapUnits = [
         {
           adapter: MOCK_SWAP_ADAPTER,
@@ -461,18 +472,22 @@ export default function App() {
         }
       ]
 
+      // Step 3: Prepare position struct (matching contract interface)
       const position = {
         collateralToken: loanTargetTokenPair.to,
         collateralAmount: collateralAmount.toString(),
         debtToken: loanTargetTokenPair.from,
-        debtAmount: debtAmount.toString(),
-        principal: ethers.utils.parseUnits(principalNum.toFixed(debtDecimals), debtDecimals).toString(),
+        debtAmount: debtAmount.toString(), // This should be the flashloan amount (borrowing amount)
+        principal: principalAmount.toString(), // Principal amount transferred to contract
         interestRateMode: loanInterestMode,
         expectProfit: expectProfitBN.toString(),
         deadline: deadlineTs
       }
 
-      // submit tx
+      console.log('Position data:', position)
+      console.log('Swap units:', swapUnits)
+
+      // Step 4: Submit createPosition transaction (PIV will pull principal via transferFrom)
       const tx = await piv.createPosition(position, false, swapUnits)
       await tx.wait()
       setError('杠杆交易已提交（交易哈希: ' + tx.hash + '）')

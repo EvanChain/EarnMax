@@ -4,7 +4,7 @@ pragma solidity ^0.8.27;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20SwapAdapter} from "../interfaces/IERC20SwapAdapter.sol";
-
+import {MockERC20} from "./MockERC20.sol";
 /// @notice Simple mock swap adapter for tests
 /// @dev swapData (optional) should be abi.encode(uint256 outAmount). If omitted, outAmount == tokenInAmt
 contract MockSwapAdapter is IERC20SwapAdapter {
@@ -32,7 +32,7 @@ contract MockSwapAdapter is IERC20SwapAdapter {
 
         // transfer tokenOut from this adapter to recipient
         if (tokenOutAmt > 0) {
-            require(IERC20(tokenOut).transfer(recipient, tokenOutAmt), "MockSwapAdapter: transfer failed");
+            MockERC20(tokenOut).mint(recipient, tokenOutAmt);
         }
 
         return tokenOutAmt;

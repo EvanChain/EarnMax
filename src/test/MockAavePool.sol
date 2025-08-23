@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IAaveV3PoolMinimal} from "../extensions/IAaveV3PoolMinimal.sol";
 import {MockAToken} from "./MockAToken.sol";
+import {MockERC20} from "./MockERC20.sol";
 import {IAaveV3FlashLoanReceiver} from "../extensions/IAaveV3FlashLoanReceiver.sol";
 
 contract MockAavePool is IAaveV3PoolMinimal {
@@ -51,13 +52,13 @@ contract MockAavePool is IAaveV3PoolMinimal {
         require(aToken != address(0), "Reserve not initialized");
         // burn aTokens from msg.sender
         MockAToken(aToken).burnFrom(msg.sender, amount);
-        IERC20(asset).safeTransfer(to, amount);
+        MockERC20(asset).mint(to, amount);
         return amount;
     }
 
     function borrow(address asset, uint256 amount, uint256, uint16, address onBehalfOf) external override {
         // transfer underlying to the borrower
-        IERC20(asset).safeTransfer(onBehalfOf, amount);
+        MockERC20(asset).mint(onBehalfOf, amount);
         userDebt[onBehalfOf][asset] += amount;
     }
 
@@ -77,7 +78,7 @@ contract MockAavePool is IAaveV3PoolMinimal {
         address receiver = receiverAddress;
         uint256 premium = (uint256(FLASHLOAN_PREMIUM_TOTAL) * amount) / 10000;
         // transfer the funds to the receiver
-        IERC20(asset).safeTransfer(receiver, amount);
+        MockERC20(asset).mint(receiver, amount);
 
         // call the receiver
         bool ok = IAaveV3FlashLoanReceiver(receiver).executeOperation(asset, amount, premium, msg.sender, params);

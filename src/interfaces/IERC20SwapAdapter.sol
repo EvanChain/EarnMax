@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-/**
- * @title TermMax ERC20SwapAdapter interface
- */
+struct SwapUnit {
+    /// @notice Adapter's address
+    address adapter;
+    /// @notice Input token address
+    address tokenIn;
+    /// @notice Output token address
+    address tokenOut;
+    /// @notice Encoded swap data
+    bytes swapData;
+}
+
 interface IERC20SwapAdapter {
     /// @notice Swap tokenIn to tokenOut
     /// @param recipient Address to receive the output tokens

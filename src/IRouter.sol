@@ -2,9 +2,9 @@
 pragma solidity ^0.8.0;
 
 interface IRouter {
-    struct OrderData {
+    struct PositionData {
         address pivAddress; // The address of the PIV contract
-        uint256[] orderIds; // The IDs of the orders to be traded
+        uint256 positionId; // The IDs of the position to be traded
     }
 
     struct SwapData {
@@ -12,7 +12,7 @@ interface IRouter {
         address tokenOut; // The address of the token being bought (collateral Token)
         uint256 amountIn; // The amount of the token being sold (debt token)
         uint256 minAmountOut; // The minimum amount of the token being bought (collateral Token)
-        OrderData[] orderDatas; // The IDs of the orders to be traded
+        PositionData[] positionDatas; // The IDs of the positions to be traded
     }
 
     /// @notice Emitted when a swap is executed
@@ -35,7 +35,7 @@ interface IRouter {
     function deployPIV() external returns (address pivAddress);
 
     /// @notice Trade an order in the PIV system
-    /// @param swapData The data required for the swap, including token addresses, amounts, and order datas
+    /// @param swapData The data required for the swap, including token addresses, amounts, and positions datas
     /// @return netAmountOut The total amount of the token being bought (collateral Token) after the swap
     /// @return totalInputAmount The total amount of the token being sold (debt token) used in the swap
     function swap(SwapData calldata swapData) external returns (uint256 netAmountOut, uint256 totalInputAmount);

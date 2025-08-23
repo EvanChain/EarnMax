@@ -3,12 +3,13 @@ pragma solidity ^0.8.0;
 
 import {IPAllActionV3} from "@pendle/core-v2/contracts/interfaces/IPAllActionV3.sol";
 import {IPMarket, IPPrincipalToken, IPYieldToken} from "@pendle/core-v2/contracts/interfaces/IPMarket.sol";
-import {PendleHelper} from "../../extensions/pendle/PendleHelper.sol";
+import {PendleHelper} from "../extensions/PendleHelper.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./ERC20SwapAdapter.sol";
 
 contract PendleSwapV3Adapter is ERC20SwapAdapter, PendleHelper {
-    using TransferUtilsV2 for IERC20;
     using Math for uint256;
+    using SafeERC20 for IERC20;
 
     IPAllActionV3 public immutable router;
 

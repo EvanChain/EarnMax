@@ -34,3 +34,4 @@ forge-std = "1.9.6"
 "@chainlink-contracts" = "1.2.0"
 "@uniswap-v3-core" = "1.0.2-solc-0.8-simulate"
 "@uniswap-v3-periphery" = "1.4.4"
+pendle-core-v2 = { version = "1.0.0", git = "https://github.com/pendle-finance/pendle-core-v2-public.git", rev = "d3dafee28062c7ee14bc2471fa0d6b4a4bc2569f" }

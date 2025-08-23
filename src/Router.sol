@@ -11,6 +11,8 @@ contract Router is IRouter {
 
     address public immutable POOL;
     address public immutable ADDRESSES_PROVIDER;
+    // The piv mapping for user
+    mapping(address => address) public userPivMapping;
 
     constructor(address aavePool, address aaveAddressProvider) {
         POOL = aavePool;
@@ -18,13 +20,17 @@ contract Router is IRouter {
     }
 
     function deployPIV() external override returns (address pivAddress) {
+        if (userPivMapping[msg.sender] != address(0)) {
+            return userPivMapping[msg.sender];
+        }
         PIV piv = new PIV(POOL, ADDRESSES_PROVIDER, msg.sender);
         pivAddress = address(piv);
+        userPivMapping[msg.sender] = pivAddress;
         emit PIVDeployed(msg.sender, pivAddress);
     }
 
-    /// @notice Trade an order in the PIV system
-    /// @param swapData The data required for the swap, including token addresses, amounts, and order datas
+    /// @notice Take position's collateral in the PIV system
+    /// @param swapData The data required for the swap, including token addresses, amounts, and position datas
     function swap(SwapData calldata swapData)
         external
         override
@@ -33,30 +39,23 @@ contract Router is IRouter {
         IERC20 tokenIn = IERC20(swapData.tokenIn);
         tokenIn.safeTransferFrom(msg.sender, address(this), swapData.amountIn);
         uint256 remainningAmount = swapData.amountIn;
-        for (uint256 i = 0; i < swapData.orderDatas.length; i++) {
-            OrderData memory orderData = swapData.orderDatas[i];
-            IPIV piv = IPIV(orderData.pivAddress);
-            (uint256 output, uint256 input) = piv.previewSwap(orderData.orderIds, remainningAmount);
+        for (uint256 i = 0; i < swapData.positionDatas.length; i++) {
+            PositionData memory positionData = swapData.positionDatas[i];
+            IPIV piv = IPIV(positionData.pivAddress);
+            (uint256 input, uint256 output) = piv.previewTakePosition(positionData.positionId, remainningAmount);
             if (input != 0 && output != 0) {
-                // Transfer the input amount to the PIV contract
-                tokenIn.safeIncreaseAllowance(address(piv), input);
-                // Execute the swap in the PIV contract
-                (output, input) = piv.swap(orderData.orderIds, input, msg.sender);
+                piv.takePosition(positionData.positionId, input, address(this));
                 remainningAmount -= input;
                 netAmountOut += output;
-                totalInputAmount += input;
             }
             if (remainningAmount == 0) {
                 break; // No more amount to swap
             }
         }
         console.log("Net amount out:", netAmountOut);
-        require(netAmountOut >= swapData.minAmountOut, "Insufficient output amount");
 
-        if (remainningAmount != 0) {
-            // If the remaining amount is not zero, refund the difference
-            tokenIn.safeTransfer(msg.sender, remainningAmount);
-        }
+        require(remainningAmount == 0, "Insufficient liquidity");
+        require(netAmountOut >= swapData.minAmountOut, "Insufficient output amount");
 
         // This is a placeholder implementation
         emit SwapExecuted(swapData.tokenIn, swapData.tokenOut, msg.sender, totalInputAmount, netAmountOut);

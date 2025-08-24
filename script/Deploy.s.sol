@@ -58,8 +58,6 @@ contract DeployScript is Script {
 
         Router router = new Router(address(pool), aaveAddressProvider);
         console.log("Router deployed at:", address(router));
-        PIV piv = new PIV(address(pool), aaveAddressProvider, deployer);
-        console.log("PIV deployed at:", address(piv));
 
         vm.stopBroadcast();
 
@@ -79,6 +77,5 @@ contract DeployScript is Script {
         vm.writeLine(deploymentsFile, string.concat("MockAPtSusde=", vm.toString(address(aPtSusde))));
         vm.writeLine(deploymentsFile, string.concat("MockAavePool=", vm.toString(address(pool))));
         vm.writeLine(deploymentsFile, string.concat("Router=", vm.toString(address(router))));
-        vm.writeLine(deploymentsFile, string.concat("PIV=", vm.toString(address(piv))));
     }
 }

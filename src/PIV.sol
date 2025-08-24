@@ -175,7 +175,24 @@ contract PIV is IAaveV3FlashLoanReceiver, Ownable, EIP712, IPIV, ReentrancyGuard
         (debtInput, collateralOutput) = _calculateTakeResult(position, inputAmount);
         if (debtInput != 0) {
             IERC20(position.debtToken).safeTransferFrom(msg.sender, address(this), debtInput);
-            IERC20(position.collateralToken).safeTransfer(receiver, collateralOutput);
+            {
+                // repay debt
+                IERC20(position.debtToken).safeIncreaseAllowance(POOL, debtInput);
+                uint256 repayAmount;
+                if (position.debtAmount > 0) {
+                    repayAmount = debtInput.min(uint256(position.debtAmount));
+                    IAaveV3PoolMinimal(POOL).repay(
+                        address(position.debtToken), repayAmount, position.interestRateMode, address(this)
+                    );
+                }
+                uint256 remainingDebtToken = debtInput - repayAmount;
+                if (remainingDebtToken > 0) {
+                    // deposit remaining debt token to aave
+                    IAaveV3PoolMinimal(POOL).supply(position.debtToken, remainingDebtToken, address(this), 0);
+                }
+            }
+            // withdraw collateral from aave and send to receiver
+            IAaveV3PoolMinimal(POOL).withdraw(address(position.collateralToken), collateralOutput, receiver);
             position.debtAmount -= int256(debtInput);
             position.expectProfit -= debtInput;
             position.collateralAmount -= collateralOutput;

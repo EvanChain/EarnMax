@@ -44,6 +44,7 @@ contract Router is IRouter {
             IPIV piv = IPIV(positionData.pivAddress);
             (uint256 input, uint256 output) = piv.previewTakePosition(positionData.positionId, remainningAmount);
             if (input != 0 && output != 0) {
+                tokenIn.safeIncreaseAllowance(positionData.pivAddress, input);
                 piv.takePosition(positionData.positionId, input, address(this));
                 remainningAmount -= input;
                 netAmountOut += output;

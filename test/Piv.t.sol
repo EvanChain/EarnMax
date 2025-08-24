@@ -287,4 +287,317 @@ contract PIVTest is Test {
         // verify the pool recorded the borrow on behalf of PIV
         assertEq(pool.userDebt(address(piv), address(usdc)), expectedDebt);
     }
+
+    function test_closePosition_closesPositionAndEmitsEvent() public {
+        // First create a position using the migrate flow
+        Position memory position;
+        position.collateralToken = address(weth);
+        position.collateralAmount = collateralAmount;
+        position.debtToken = address(usdc);
+        position.debtAmount = int256(debtAmount);
+        position.principal = 0;
+        position.interestRateMode = interestRateMode;
+        position.expectProfit = 0;
+        position.deadline = 0;
+
+        // migrate as the user (owner)
+        vm.prank(user);
+        uint256 posId = piv.migrateFromAave(position);
+
+        // verify position was created
+        assertEq(posId, 1);
+        assertEq(piv.totalPositions(), 1);
+
+        // Get the actual debt amount after migration (includes premium from migration)
+        (, , , int256 actualDebtAmount, , , , ) = piv.positionMapping(1);
+        uint256 actualDebt = uint256(actualDebtAmount);
+
+        // deploy a mock swap adapter for closing
+        MockSwapAdapter adapter = new MockSwapAdapter();
+
+        // ensure the pool has enough debt token for flash loan repayment
+        usdc.mint(address(pool), actualDebt * 2);
+        vm.prank(address(pool));
+        usdc.approve(address(piv), actualDebt * 2);
+
+        // calculate expected profit for closing (need to account for closing premium too)
+        uint256 closingPremium = (uint256(pool.FLASHLOAN_PREMIUM_TOTAL()) * actualDebt) / 10000;
+        uint256 swapOutput = actualDebt + closingPremium + 100e6; // enough to cover repayment + some profit
+        uint256 expectedProfit = swapOutput - (actualDebt + closingPremium);
+
+        // construct swap units to convert collateralToken -> debtToken
+        SwapUnit[] memory units = new SwapUnit[](1);
+        units[0] = SwapUnit({
+            adapter: address(adapter),
+            tokenIn: address(weth),
+            tokenOut: address(usdc),
+            swapData: abi.encode(swapOutput) // mock adapter will return this amount
+        });
+
+        // verify initial position state
+        (
+            address collateralToken0,
+            uint256 collateralAmount0,
+            address debtToken0,
+            int256 debtAmount0,
+            uint256 principal0,
+            uint256 interestRateMode0,
+            uint256 expectProfit0,
+            uint256 deadline0
+        ) = piv.positionMapping(1);
+        
+        assertTrue(debtAmount0 > 0, "Position should have debt before closing");
+        assertTrue(collateralAmount0 > 0, "Position should have collateral before closing");
+
+        // expect the LoanClosed event with the calculated profit
+        vm.expectEmit(true, true, false, false);
+        emit IPIV.LoanClosed(1, expectedProfit);
+
+        // close position as the owner (user)
+        vm.prank(user);
+        piv.closePosition(1, units);
+
+        // verify position is marked as closed
+        (
+            address collateralToken1,
+            uint256 collateralAmount1,
+            address debtToken1,
+            int256 debtAmount1,
+            uint256 principal1,
+            uint256 interestRateMode1,
+            uint256 expectProfit1,
+            uint256 deadline1
+        ) = piv.positionMapping(1);
+
+        assertEq(debtAmount1, -int256(expectedProfit), "Debt amount should be negative profit after closing");
+        assertEq(collateralAmount1, 0, "Collateral amount should be zero after closing");
+        assertEq(expectProfit1, 0, "Expect profit should be zero after closing");
+        assertEq(deadline1, 0, "Deadline should be zero after closing");
+
+        // verify PIV no longer holds the aToken
+        assertEq(aWeth.balanceOf(address(piv)), 0, "PIV should not hold aTokens after closing");
+    }
+
+    function test_closePosition_revertsIfPositionAlreadyClosed() public {
+        // First create a position using the migrate flow
+        Position memory position;
+        position.collateralToken = address(weth);
+        position.collateralAmount = collateralAmount;
+        position.debtToken = address(usdc);
+        position.debtAmount = int256(debtAmount);
+        position.principal = 0;
+        position.interestRateMode = interestRateMode;
+        position.expectProfit = 0;
+        position.deadline = 0;
+
+        // migrate as the user (owner)
+        vm.prank(user);
+        uint256 posId = piv.migrateFromAave(position);
+
+        // Get the actual debt amount after migration
+        (, , , int256 actualDebtAmount, , , , ) = piv.positionMapping(1);
+        uint256 actualDebt = uint256(actualDebtAmount);
+
+        // close the position first
+        MockSwapAdapter adapter = new MockSwapAdapter();
+        usdc.mint(address(pool), actualDebt * 2);
+        vm.prank(address(pool));
+        usdc.approve(address(piv), actualDebt * 2);
+
+        // calculate required amount for successful close
+        uint256 premium = (uint256(pool.FLASHLOAN_PREMIUM_TOTAL()) * actualDebt) / 10000;
+        uint256 swapOutput = actualDebt + premium + 100e6; // enough to cover repayment
+
+        SwapUnit[] memory units = new SwapUnit[](1);
+        units[0] = SwapUnit({
+            adapter: address(adapter),
+            tokenIn: address(weth),
+            tokenOut: address(usdc),
+            swapData: abi.encode(swapOutput)
+        });
+
+        vm.prank(user);
+        piv.closePosition(1, units);
+
+        // try to close again - should revert
+        vm.prank(user);
+        vm.expectRevert("Position already closed");
+        piv.closePosition(1, units);
+    }
+
+    function test_closePosition_revertsIfNotOwner() public {
+        // First create a position using the migrate flow
+        Position memory position;
+        position.collateralToken = address(weth);
+        position.collateralAmount = collateralAmount;
+        position.debtToken = address(usdc);
+        position.debtAmount = int256(debtAmount);
+        position.principal = 0;
+        position.interestRateMode = interestRateMode;
+        position.expectProfit = 0;
+        position.deadline = 0;
+
+        // migrate as the user (owner)
+        vm.prank(user);
+        uint256 posId = piv.migrateFromAave(position);
+
+        // deploy a mock swap adapter
+        MockSwapAdapter adapter = new MockSwapAdapter();
+        SwapUnit[] memory units = new SwapUnit[](1);
+        units[0] = SwapUnit({
+            adapter: address(adapter),
+            tokenIn: address(weth),
+            tokenOut: address(usdc),
+            swapData: abi.encode(debtAmount)
+        });
+
+        // try to close as non-owner - should revert
+        address nonOwner = vm.addr(999);
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        piv.closePosition(1, units);
+    }
+
+    function test_closePosition_revertsIfInsufficientDebtTokenAfterSwap() public {
+        // First create a position using the migrate flow
+        Position memory position;
+        position.collateralToken = address(weth);
+        position.collateralAmount = collateralAmount;
+        position.debtToken = address(usdc);
+        position.debtAmount = int256(debtAmount);
+        position.principal = 0;
+        position.interestRateMode = interestRateMode;
+        position.expectProfit = 0;
+        position.deadline = 0;
+
+        // migrate as the user (owner)
+        vm.prank(user);
+        uint256 posId = piv.migrateFromAave(position);
+
+        // deploy a mock swap adapter that returns insufficient amount
+        MockSwapAdapter adapter = new MockSwapAdapter();
+        usdc.mint(address(pool), debtAmount * 2);
+        vm.prank(address(pool));
+        usdc.approve(address(piv), debtAmount * 2);
+
+        SwapUnit[] memory units = new SwapUnit[](1);
+        units[0] = SwapUnit({
+            adapter: address(adapter),
+            tokenIn: address(weth),
+            tokenOut: address(usdc),
+            swapData: abi.encode(debtAmount / 2) // insufficient amount
+        });
+
+        // expect revert due to insufficient debt token after swap
+        vm.prank(user);
+        vm.expectRevert("Insufficient debt token after swap");
+        piv.closePosition(1, units);
+    }
+
+    function test_closePosition_worksWithCreatedPosition() public {
+        // Create a new position using createPosition instead of migrate
+        MockSwapAdapter adapter = new MockSwapAdapter();
+
+        // prepare a new position
+        Position memory position;
+        position.collateralToken = address(weth);
+        position.collateralAmount = collateralAmount;
+        position.debtToken = address(usdc);
+        position.debtAmount = int256(500e6);
+        position.principal = 0;
+        position.interestRateMode = interestRateMode;
+        position.expectProfit = 0;
+        position.deadline = 0;
+
+        uint256 loanAmt = uint256(position.debtAmount);
+
+        // ensure the pool has enough of the debt token
+        usdc.mint(address(pool), loanAmt * 3);
+        vm.prank(address(pool));
+        usdc.approve(address(piv), loanAmt * 3);
+
+        // construct swap units for creation
+        SwapUnit[] memory createUnits = new SwapUnit[](1);
+        createUnits[0] = SwapUnit({
+            adapter: address(adapter),
+            tokenIn: address(usdc),
+            tokenOut: address(weth),
+            swapData: abi.encode(collateralAmount)
+        });
+
+        // create position
+        vm.prank(user);
+        uint256 posId = piv.createPosition(position, false, createUnits);
+
+        // verify position was created
+        assertEq(posId, 1);
+        assertEq(piv.totalPositions(), 1);
+
+        // get the actual debt amount after creation (includes premium)
+        (, , , int256 actualDebtAmount, , , , ) = piv.positionMapping(1);
+        uint256 actualDebt = uint256(actualDebtAmount);
+
+        // calculate required amount for closing
+        uint256 premium = (uint256(pool.FLASHLOAN_PREMIUM_TOTAL()) * actualDebt) / 10000;
+        uint256 swapOutput = actualDebt + premium + 100e6; // enough to cover loan + premium + profit
+        uint256 expectedProfit = swapOutput - (actualDebt + premium);
+
+        // construct swap units for closing (reverse direction)
+        SwapUnit[] memory closeUnits = new SwapUnit[](1);
+        closeUnits[0] = SwapUnit({
+            adapter: address(adapter),
+            tokenIn: address(weth),
+            tokenOut: address(usdc),
+            swapData: abi.encode(swapOutput)
+        });
+
+        // close the position
+        vm.prank(user);
+        piv.closePosition(1, closeUnits);
+
+        // verify position is closed
+        (
+            ,
+            uint256 collateralAmount1,
+            ,
+            int256 debtAmount1,
+            ,
+            ,
+            uint256 expectProfit1,
+            uint256 deadline1
+        ) = piv.positionMapping(1);
+
+        assertEq(debtAmount1, -int256(expectedProfit), "Debt amount should be negative profit after closing");
+        assertEq(collateralAmount1, 0, "Collateral amount should be zero after closing");
+        assertEq(expectProfit1, 0, "Expect profit should be zero after closing");
+        assertEq(deadline1, 0, "Deadline should be zero after closing");
+    }
+
+    function test_closePosition_revertsWithEmptySwapUnits() public {
+        // First create a position
+        Position memory position;
+        position.collateralToken = address(weth);
+        position.collateralAmount = collateralAmount;
+        position.debtToken = address(usdc);
+        position.debtAmount = int256(debtAmount);
+        position.principal = 0;
+        position.interestRateMode = interestRateMode;
+        position.expectProfit = 0;
+        position.deadline = 0;
+
+        vm.prank(user);
+        uint256 posId = piv.migrateFromAave(position);
+
+        // ensure pool has enough debt tokens
+        usdc.mint(address(pool), debtAmount * 2);
+        vm.prank(address(pool));
+        usdc.approve(address(piv), debtAmount * 2);
+
+        // try to close with empty swap units
+        SwapUnit[] memory emptyUnits = new SwapUnit[](0);
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(IPIV.SwapUnitsIsEmpty.selector));
+        piv.closePosition(1, emptyUnits);
+    }
 }

@@ -19,7 +19,8 @@ contract PIV is IAaveV3FlashLoanReceiver, Ownable, EIP712, IPIV, ReentrancyGuard
 
     enum FlashLoanOperation {
         MigrateFromAave,
-        NewLoan
+        NewLoan,
+        ClosePosition
     }
 
     /// @notice aave V3 Pool address
@@ -46,8 +47,8 @@ contract PIV is IAaveV3FlashLoanReceiver, Ownable, EIP712, IPIV, ReentrancyGuard
             _migrateFromAave(params, asset, amount, premium);
         } else if (operation == FlashLoanOperation.NewLoan) {
             _newLoan(params, asset, amount, premium);
-        } else {
-            revert("Invalid operation");
+        } else if (operation == FlashLoanOperation.ClosePosition) {
+            _closePosition(params, asset, amount, premium);
         }
         IERC20(asset).safeIncreaseAllowance(POOL, amount + premium);
         return true;
@@ -117,6 +118,40 @@ contract PIV is IAaveV3FlashLoanReceiver, Ownable, EIP712, IPIV, ReentrancyGuard
             address(this), address(position.debtToken), uint256(position.debtAmount), params, 0
         );
         positionId = totalPositions;
+    }
+
+    function closePosition(uint256 positionId, SwapUnit[] memory swapUnits) external onlyOwner {
+        Position memory position = positionMapping[positionId];
+        require(position.debtAmount > 0, "Position already closed");
+
+        bytes memory params = abi.encode(positionId, position, swapUnits);
+        params = abi.encode(FlashLoanOperation.ClosePosition, params);
+        IAaveV3PoolMinimal(POOL).flashLoanSimple(
+            address(this), address(position.debtToken), uint256(position.debtAmount), params, 0
+        );
+    }
+
+    function _closePosition(bytes memory params, address asset, uint256 amount, uint256 premium) internal {
+        (uint256 positionId, Position memory position, SwapUnit[] memory swapUnits) = abi.decode(
+            params, (uint256, Position, SwapUnit[])
+        );
+        //repay debt
+        IERC20(asset).safeIncreaseAllowance(POOL, amount);
+        IAaveV3PoolMinimal(POOL).repay(asset, amount, position.interestRateMode, address(this));
+        //withdraw collateral from aave
+        IAaveV3PoolMinimal(POOL).withdraw(address(position.collateralToken), position.collateralAmount, address(this));
+        //swap collateral to debt token
+        uint256 debtAmount = _doSwap(position.collateralAmount, swapUnits);
+        require(debtAmount >= amount + premium, "Insufficient debt token after swap");
+        //calculate profit before marking position as closed
+        uint256 profit = debtAmount - (amount + premium);
+        //mark position as closed
+        position.debtAmount = -int256(profit);
+        position.collateralAmount = 0;
+        position.expectProfit = 0;
+        position.deadline = 0;
+        positionMapping[positionId] = position;
+        emit IPIV.LoanClosed(positionId, profit);
     }
 
     function aTokenAddress(address asset) public view returns (address) {

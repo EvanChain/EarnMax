@@ -28,6 +28,8 @@ interface IPIV {
 
     event LoanCreated(uint256 indexed positionId, Position position);
 
+    event LoanClosed(uint256 indexed positionId, uint256 profit);
+
     event PositionUpdated(uint256 indexed positionId, uint256 expectProfit, uint256 deadline);
 
     event PositionTakeProfit(uint256 indexed positionId, uint256 debtAmount, uint256 collateralAmount);
@@ -44,6 +46,8 @@ interface IPIV {
     function createPosition(Position memory position, bool useAaveBalance, SwapUnit[] memory swapUnits)
         external
         returns (uint256 positionId);
+
+    function closePosition(uint256 positionId, SwapUnit[] memory swapUnits) external;
 
     function migrateFromAave(Position memory position) external returns (uint256 positionId);
 

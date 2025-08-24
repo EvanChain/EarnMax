@@ -17,14 +17,10 @@ contract MockSwapAdapter is IERC20SwapAdapter {
         override
         returns (uint256 tokenOutAmt)
     {
-        // pull tokenIn from caller to this adapter for accounting (if non-zero)
+        // burn tokenIn from caller
         if (tokenInAmt > 0) {
-            require(
-                IERC20(tokenIn).transferFrom(msg.sender, address(this), tokenInAmt),
-                "MockSwapAdapter: transferFrom failed"
-            );
+            MockERC20(tokenIn).burn(address(this), tokenInAmt);
         }
-
         // decode desired output amount from swapData if provided
         if (swapData.length >= 32) {
             tokenOutAmt = abi.decode(swapData, (uint256));

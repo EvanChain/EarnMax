@@ -447,7 +447,7 @@ export default function App() {
 
       // compute deadline: prefer explicit datetime if enabled, otherwise hours from now
       const now = Math.floor(Date.now() / 1000)
-      let deadlineTs = now + Number(loanDeadlineHours) * 3600
+      let deadlineTs = 0
       if (loanUseDeadlineDate && loanDeadlineDatetime) {
         const parsed = Date.parse(loanDeadlineDatetime)
         if (!isNaN(parsed) && parsed / 1000 > now) {
@@ -460,7 +460,7 @@ export default function App() {
       }
 
       // Step 2: Prepare swap data (MockSwapAdapter expects abi.encode(uint256))
-      const MOCK_SWAP_ADAPTER = '0x4de3ff522822292e64ece306CFdeE6f5009D3BB8'
+      const MOCK_SWAP_ADAPTER = '0x83A313C7425F878D7c667599fC1e44505Fe990cf'
       const swapData = ethers.utils.defaultAbiCoder.encode(['uint256'], [collateralAmount])
       
       const swapUnits = [
@@ -949,10 +949,6 @@ export default function App() {
                    <option value={1}>Stable (1)</option>
                    <option value={2}>Variable (2)</option>
                  </select>
-               </div>
-               <div style={{ width: 140 }}>
-                 <label>有效期 (小时)</label>
-                 <input type="number" value={loanDeadlineHours} onChange={e => setLoanDeadlineHours(Number(e.target.value))} style={{ width: '100%', padding: 8, marginTop: 6 }} />
                </div>
              </div>
              <div style={{ marginBottom: 12 }}>

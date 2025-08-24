@@ -36,6 +36,10 @@ export default function App() {
   const [mockPtAddr, setMockPtAddr] = useState(null)
   const [balances, setBalances] = useState({})
 
+  // Positions state
+  const [positions, setPositions] = useState([])
+  const [positionsLoading, setPositionsLoading] = useState(false)
+
   const [routerAddr, setRouterAddr] = useState(DEPLOYMENTS.Router)
   const [userPivAddr, setUserPivAddr] = useState(null)
   const [deploying, setDeploying] = useState(false)
@@ -50,7 +54,6 @@ export default function App() {
   const [loanPrincipalInput, setLoanPrincipalInput] = useState('100') // principal in USDC
   const [loanSelectedLeverage, setLoanSelectedLeverage] = useState(3)
   const [loanInterestMode, setLoanInterestMode] = useState(2)
-  const [loanDeadlineHours, setLoanDeadlineHours] = useState(1)
   const [loanSubmitting, setLoanSubmitting] = useState(false)
   const [loanApproving, setLoanApproving] = useState(false)
   const [loanTargetTokenPair, setLoanTargetTokenPair] = useState({ from: null, to: null })
@@ -305,6 +308,66 @@ export default function App() {
     }
   }
 
+  // Fetch user positions from PIV contract
+  async function fetchPositions() {
+    if (!account) {
+      setPositions([])
+      return
+    }
+    setPositionsLoading(true)
+    try {
+      const targetPivAddr = userPivAddr || PIV_FIXED_ADDR
+      const p = provider || new ethers.providers.JsonRpcProvider()
+      const piv = new ethers.Contract(targetPivAddr, pivAbi, p)
+      
+      // Get total positions count
+      const totalPositions = await piv.totalPositions()
+      const totalCount = totalPositions.toNumber()
+      
+      if (totalCount === 0) {
+        setPositions([])
+        return
+      }
+      
+      // Fetch all positions (position IDs start from 1)
+      const positionPromises = []
+      for (let i = 1; i <= totalCount; i++) {
+        positionPromises.push(piv.positionMapping(i))
+      }
+      
+      const positionResults = await Promise.all(positionPromises)
+      
+      // Format positions data
+      const formattedPositions = positionResults.map((pos, index) => {
+        const positionId = index + 1
+        return {
+          id: positionId,
+          collateralToken: pos.collateralToken,
+          collateralAmount: ethers.utils.formatUnits(pos.collateralAmount, 18), // PT has 18 decimals
+          debtToken: pos.debtToken,
+          debtAmount: ethers.utils.formatUnits(pos.debtAmount.abs(), 6), // USDC has 6 decimals, use abs() for display
+          principal: ethers.utils.formatUnits(pos.principal, 6),
+          interestRateMode: pos.interestRateMode.toNumber(),
+          expectProfit: ethers.utils.formatUnits(pos.expectProfit, 6),
+          deadline: pos.deadline.toNumber(),
+          // deadline 是限制他人 take position 的截止时间，过期后他人无法 take
+          takeDeadlineExpired: pos.deadline.toNumber() > 0 && pos.deadline.toNumber() < Math.floor(Date.now() / 1000),
+          // 仓位所有者随时可以平仓（不受 deadline 限制）
+          canOwnerClose: true,
+          // 他人可以 take 的条件：有预期利润且未过 deadline
+          canOthersTake: pos.expectProfit.gt(0) && (pos.deadline.toNumber() === 0 || pos.deadline.toNumber() > Math.floor(Date.now() / 1000))
+        }
+      })
+      
+      setPositions(formattedPositions)
+    } catch (e) {
+      console.error('fetchPositions error', e)
+      setError('无法获取 Positions 数据：' + (e.message || e.toString()))
+    } finally {
+      setPositionsLoading(false)
+    }
+  }
+
   // Approve USDC for PIV contract
   async function approvePrincipal() {
     if (!signer || !mockUSDCAddr) {
@@ -355,7 +418,6 @@ export default function App() {
     setLoanPrincipalInput('100')
     setLoanSelectedLeverage(3)
     setLoanInterestMode(2)
-    setLoanDeadlineHours(1)
     // check current allowance
     await checkPrincipalAllowance()
     setShowLoanForm(true)
@@ -447,7 +509,7 @@ export default function App() {
 
       // compute deadline: prefer explicit datetime if enabled, otherwise hours from now
       const now = Math.floor(Date.now() / 1000)
-      let deadlineTs = 0
+      let deadlineTs = 0 // default to 0 (no deadline)
       if (loanUseDeadlineDate && loanDeadlineDatetime) {
         const parsed = Date.parse(loanDeadlineDatetime)
         if (!isNaN(parsed) && parsed / 1000 > now) {
@@ -548,6 +610,13 @@ export default function App() {
 
   // Show balance page state
   const [showBalancePage, setShowBalancePage] = useState(false)
+
+  // Auto-fetch positions when balance page is opened and account is connected
+  useEffect(() => {
+    if (showBalancePage && account && (userPivAddr || PIV_FIXED_ADDR)) {
+      fetchPositions()
+    }
+  }, [showBalancePage, account, userPivAddr])
 
   function updateTokenLeverage(symbol, val) {
     setTokenLeverages(prev => ({ ...prev, [symbol]: val }))
@@ -756,6 +825,168 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* Positions Section */}
+          {account && (
+            <div style={{ marginTop: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>我的杠杆仓位</h2>
+                  <div style={{ color: 'var(--muted)', marginTop: 6, fontSize: 14 }}>
+                    查看您在 PIV 合约中的所有杠杆仓位
+                  </div>
+                </div>
+                <button 
+                  onClick={fetchPositions} 
+                  disabled={positionsLoading} 
+                  style={{ 
+                    padding: '8px 16px', 
+                    borderRadius: 8, 
+                    background: positionsLoading ? '#9ca3af' : '#7c3aed', 
+                    color: 'white', 
+                    border: 'none', 
+                    cursor: positionsLoading ? 'not-allowed' : 'pointer' 
+                  }}
+                >
+                  {positionsLoading ? '加载中...' : '刷新仓位'}
+                </button>
+              </div>
+
+              {positionsLoading ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
+                  正在加载仓位数据...
+                </div>
+              ) : positions.length === 0 ? (
+                <div style={{ 
+                  textAlign: 'center', 
+                  padding: 40, 
+                  background: 'rgba(255,255,255,0.02)', 
+                  borderRadius: 12, 
+                  border: '1px solid rgba(255,255,255,0.04)' 
+                }}>
+                  <div style={{ fontSize: 18, marginBottom: 8 }}>🏦</div>
+                  <div style={{ color: 'var(--muted)' }}>暂无杠杆仓位</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+                    返回首页创建您的第一个杠杆仓位
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: 16 }}>
+                  {positions.map(position => (
+                    <div key={position.id} style={{ 
+                      background: 'rgba(255,255,255,0.02)', 
+                      padding: 18, 
+                      borderRadius: 12, 
+                      border: '1px solid rgba(255,255,255,0.04)' 
+                    }}>
+                      {/* Position Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 18 }}>Position #{position.id}</div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                            {position.collateralToken === mockPtAddr ? 'PT-sUSDE' : shortAddress(position.collateralToken)} 
+                            {' → '} 
+                            {position.debtToken === mockUSDCAddr ? 'USDC' : shortAddress(position.debtToken)}
+                          </div>
+                        </div>
+                        <div style={{ 
+                          padding: '4px 8px', 
+                          borderRadius: 6, 
+                          fontSize: 12, 
+                          fontWeight: 700,
+                          background: position.canOthersTake ? '#10b981' : position.takeDeadlineExpired ? '#ef4444' : '#6b7280',
+                          color: 'white'
+                        }}>
+                          {position.canOthersTake ? 'Take 开放' : position.takeDeadlineExpired ? 'Take 过期' : '活跃中'}
+                        </div>
+                      </div>
+
+                      {/* Position Details */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                        <div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>本金</div>
+                          <div style={{ fontWeight: 700 }}>{Number(position.principal).toFixed(2)} USDC</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>债务</div>
+                          <div style={{ fontWeight: 700, color: '#ef4444' }}>{Number(position.debtAmount).toFixed(2)} USDC</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>抵押品</div>
+                          <div style={{ fontWeight: 700 }}>{Number(position.collateralAmount).toFixed(4)} PT</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>利率模式</div>
+                          <div style={{ fontWeight: 700 }}>{position.interestRateMode === 1 ? 'Stable' : 'Variable'}</div>
+                        </div>
+                      </div>
+
+                      {/* Profit & Deadline Info */}
+                      {(Number(position.expectProfit) > 0 || position.deadline > 0) && (
+                        <div style={{ 
+                          borderTop: '1px solid rgba(255,255,255,0.04)', 
+                          paddingTop: 12, 
+                          marginTop: 12 
+                        }}>
+                          {Number(position.expectProfit) > 0 && (
+                            <div style={{ marginBottom: 8 }}>
+                              <div style={{ fontSize: 12, color: 'var(--muted)' }}>预期利润</div>
+                              <div style={{ fontWeight: 700, color: '#10b981' }}>
+                                {Number(position.expectProfit).toFixed(2)} USDC
+                              </div>
+                            </div>
+                          )}
+                          {position.deadline > 0 && (
+                            <div>
+                              <div style={{ fontSize: 12, color: 'var(--muted)' }}>截止时间</div>
+                              <div style={{ 
+                                fontWeight: 700, 
+                                color: position.takeDeadlineExpired ? '#ef4444' : '#6b7280' 
+                              }}>
+                                {new Date(position.deadline * 1000).toLocaleString()}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+                        <button 
+                          disabled={!position.canOwnerClose}
+                          style={{ 
+                            flex: 1,
+                            padding: '8px 12px', 
+                            borderRadius: 6, 
+                            background: position.canOwnerClose ? '#10b981' : '#6b7280', 
+                            color: 'white', 
+                            border: 'none',
+                            cursor: position.canOwnerClose ? 'pointer' : 'not-allowed',
+                            fontSize: 12
+                          }}
+                        >
+                          {position.canOwnerClose ? '平仓获利' : '暂不可平仓'}
+                        </button>
+                        <button 
+                          style={{ 
+                            padding: '8px 12px', 
+                            borderRadius: 6, 
+                            background: 'rgba(255,255,255,0.05)', 
+                            color: 'white', 
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            cursor: 'pointer',
+                            fontSize: 12
+                          }}
+                        >
+                          详情
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         /* Main Page - Dex-style header + token list */
@@ -909,8 +1140,8 @@ export default function App() {
               </button>
             </div>
 
-             <div style={{ marginBottom: 8 }}>
-               <label>本金 (USDC)</label>
+            <div style={{ marginBottom: 8 }}>
+              <label>本金 (USDC)</label>
               <input 
                 type="number" 
                 value={loanPrincipalInput} 
@@ -918,9 +1149,9 @@ export default function App() {
                 placeholder="输入本金数量" 
                 style={{ width: '100%', marginTop: 6, padding: 8 }} 
               />
-             </div>
-             <div style={{ marginBottom: 8 }}>
-               <label>杠杆倍率</label>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <label>杠杆倍率</label>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                 <input 
                   type="range" 
@@ -933,53 +1164,56 @@ export default function App() {
                 />
                 <div style={{ fontWeight: 700, minWidth: 40 }}>{loanSelectedLeverage}x</div>
               </div>
-             </div>
-             <div style={{ marginBottom: 8 }}>
-               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                 <input type="checkbox" checked={loanUseClosePrice} onChange={e => setLoanUseClosePrice(e.target.checked)} /> 设定平仓价格 (USDC / PT)
-               </label>
-               {loanUseClosePrice && (
-                 <input value={loanClosePriceInput} onChange={e => setLoanClosePriceInput(e.target.value)} placeholder="例如: 200 (表示 200 USDC 每 1 PT)" style={{ width: '100%', marginTop: 6, padding: 8 }} />
-               )}
-             </div>
-             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-               <div style={{ flex: 1 }}>
-                 <label>利率模式</label>
-                 <select value={loanInterestMode} onChange={e => setLoanInterestMode(Number(e.target.value))} style={{ width: '100%', padding: 8, marginTop: 6 }}>
-                   <option value={1}>Stable (1)</option>
-                   <option value={2}>Variable (2)</option>
-                 </select>
-               </div>
-             </div>
-             <div style={{ marginBottom: 12 }}>
-               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                 <input type="checkbox" checked={loanUseDeadlineDate} onChange={e => setLoanUseDeadlineDate(e.target.checked)} /> 最晚到期时间
-               </label>
-               {loanUseDeadlineDate && (
-                 <input type="datetime-local" value={loanDeadlineDatetime} onChange={e => setLoanDeadlineDatetime(e.target.value)} style={{ width: '100%', marginTop: 6, padding: 8 }} />
-               )}
-             </div>
-             {/* display computed expectProfit if close price enabled */}
-             {loanUseClosePrice && loanClosePriceInput && (
-               <div style={{ marginBottom: 12, color: '#374151' }}>
-                 预估 expectProfit: {(() => {
-                   try {
-                     const debtDecimals = 6
-                     const collateralDecimals = 18
-                     const coll = ethers.utils.parseUnits(loanPrincipalInput || '0', collateralDecimals)
-                     const closePriceScaled = ethers.utils.parseUnits(loanClosePriceInput.trim(), debtDecimals)
-                     const collateralScale = ethers.BigNumber.from(10).pow(collateralDecimals)
-                     const valueInDebt = coll.mul(closePriceScaled).div(collateralScale)
-                     const debt = ethers.utils.parseUnits(loanPrincipalInput || '0', debtDecimals)
-                     const expectBN = valueInDebt.gt(debt) ? valueInDebt.sub(debt) : ethers.BigNumber.from(0)
-                     return ethers.utils.formatUnits(expectBN, debtDecimals) + ' USDC'
-                   } catch (e) {
-                     return '—'
-                   }
-                 })()}</div>
-             )}
-             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-               <button onClick={cancelLoanForm} disabled={loanSubmitting} style={{ padding: '8px 12px' }}>取消</button>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={loanUseClosePrice} onChange={e => setLoanUseClosePrice(e.target.checked)} /> 设定平仓价格 (USDC / PT)
+              </label>
+              {loanUseClosePrice && (
+                <input value={loanClosePriceInput} onChange={e => setLoanClosePriceInput(e.target.value)} placeholder="例如: 200 (表示 200 USDC 每 1 PT)" style={{ width: '100%', marginTop: 6, padding: 8 }} />
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label>利率模式</label>
+                <select value={loanInterestMode} onChange={e => setLoanInterestMode(Number(e.target.value))} style={{ width: '100%', padding: 8, marginTop: 6 }}>
+                  <option value={1}>Stable (1)</option>
+                  <option value={2}>Variable (2)</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={loanUseDeadlineDate} onChange={e => setLoanUseDeadlineDate(e.target.checked)} /> 设置具体的 Take 截止时间
+              </label>
+              {loanUseDeadlineDate && (
+                <input type="datetime-local" value={loanDeadlineDatetime} onChange={e => setLoanDeadlineDatetime(e.target.value)} style={{ width: '100%', marginTop: 6, padding: 8 }} />
+              )}
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                ⚠️ 说明：deadline 限制其他人 take 您的仓位的截止时间，过期后其他人无法 take。您作为仓位所有者可随时平仓，不受此限制。
+              </div>
+            </div>
+            {/* display computed expectProfit if close price enabled */}
+            {loanUseClosePrice && loanClosePriceInput && (
+              <div style={{ marginBottom: 12, color: '#374151' }}>
+                预估 expectProfit: {(() => {
+                  try {
+                    const debtDecimals = 6
+                    const collateralDecimals = 18
+                    const coll = ethers.utils.parseUnits(loanPrincipalInput || '0', collateralDecimals)
+                    const closePriceScaled = ethers.utils.parseUnits(loanClosePriceInput.trim(), debtDecimals)
+                    const collateralScale = ethers.BigNumber.from(10).pow(collateralDecimals)
+                    const valueInDebt = coll.mul(closePriceScaled).div(collateralScale)
+                    const debt = ethers.utils.parseUnits(loanPrincipalInput || '0', debtDecimals)
+                    const expectBN = valueInDebt.gt(debt) ? valueInDebt.sub(debt) : ethers.BigNumber.from(0)
+                    return ethers.utils.formatUnits(expectBN, debtDecimals) + ' USDC'
+                  } catch (e) {
+                    return '—'
+                  }
+                })()}</div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={cancelLoanForm} disabled={loanSubmitting} style={{ padding: '8px 12px' }}>取消</button>
               <button 
                 onClick={submitCreateLoan} 
                 disabled={loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')} 
@@ -993,10 +1227,10 @@ export default function App() {
               >
                 {loanSubmitting ? '提交中...' : '确认并提交'}
               </button>
-             </div>
-           </div>
-         </div>
-       )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div style={{ marginTop: 16, color: '#ff8b8b' }}>错误: {error}</div>

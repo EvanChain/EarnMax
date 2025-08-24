@@ -1577,12 +1577,22 @@ export default function App() {
 
       {/* Loan creation modal/form */}
       {showLoanForm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-          <div style={{ background: 'white', color: 'black', padding: 18, borderRadius: 8, width: 420, maxWidth: '95%' }}>
-            <h3 style={{ marginTop: 0 }}>创建杠杆贷款 — USDC → PT-sUSDE</h3>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '20px' }}>
+          <div style={{ 
+            background: 'white', 
+            color: 'black', 
+            padding: 18, 
+            borderRadius: 8, 
+            width: 420, 
+            maxWidth: '95%',
+            maxHeight: '90vh',
+            overflow: 'auto',
+            position: 'relative'
+          }}>
+            <h3 style={{ marginTop: 0, position: 'sticky', top: 0, background: 'white', paddingBottom: 10, borderBottom: '1px solid #e5e7eb' }}>创建杠杆贷款 — USDC → PT-sUSDE</h3>
             
-            {/* 计算预览区域 */}
-            {(() => {
+            <div style={{ paddingTop: 10 }}>
+              {(() => {
               const principalNum = Number(loanPrincipalInput || '0')
               const L = Number(loanSelectedLeverage || 1)
               if (principalNum > 0 && L >= 1) {
@@ -1728,21 +1738,32 @@ export default function App() {
                 })()}
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button onClick={cancelLoanForm} disabled={loanSubmitting} style={{ padding: '8px 12px' }}>取消</button>
-              <button 
-                onClick={submitCreateLoan} 
-                disabled={loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')} 
-                style={{ 
-                  padding: '8px 12px', 
-                  background: (loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')) ? '#9ca3af' : '#f59e0b', 
-                  color: 'white', 
-                  border: 'none',
-                  cursor: (loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')) ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {loanSubmitting ? '提交中...' : '确认并提交'}
-              </button>
+            </div>
+
+            <div style={{ 
+              position: 'sticky', 
+              bottom: 0, 
+              background: 'white', 
+              paddingTop: 12, 
+              borderTop: '1px solid #e5e7eb',
+              marginTop: 12
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button onClick={cancelLoanForm} disabled={loanSubmitting} style={{ padding: '8px 12px' }}>取消</button>
+                <button 
+                  onClick={submitCreateLoan} 
+                  disabled={loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')} 
+                  style={{ 
+                    padding: '8px 12px', 
+                    background: (loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')) ? '#9ca3af' : '#f59e0b', 
+                    color: 'white', 
+                    border: 'none',
+                    cursor: (loanSubmitting || Number(principalAllowance) < Number(loanPrincipalInput || '0')) ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {loanSubmitting ? '提交中...' : '确认并提交'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

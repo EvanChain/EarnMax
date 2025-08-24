@@ -117,6 +117,66 @@ contract PIVTest is Test {
         assertEq(collateralOutput, expectedCollateralOut);
     }
 
+    function test_takePosition_allowsWhenDeadlineInFuture() public {
+        // reuse migrate flow to create a position
+        Position memory position;
+        position.collateralToken = address(weth);
+        position.collateralAmount = collateralAmount;
+        position.debtToken = address(usdc);
+        position.debtAmount = int256(debtAmount);
+        position.principal = 0;
+        position.interestRateMode = interestRateMode;
+        position.expectProfit = 0;
+        position.deadline = 0;
+
+        // migrate as the user (owner)
+        vm.prank(user);
+        piv.migrateFromAave(position);
+
+        // update expectProfit and deadline in the future so position is takeable
+        uint256 expectProfit = 500e6; // expected profit in debt token units
+        uint256 deadline = block.timestamp + 1 hours; // future deadline
+        vm.prank(user);
+        piv.updateExpectProfit(1, expectProfit, deadline);
+
+        // choose an input amount less than expectProfit
+        uint256 input = 200e6;
+        (uint256 debtInput, uint256 collateralOutput) = piv.previewTakePosition(1, input);
+
+        // preview should return non-zero values (deadline in future should allow taking)
+        assertEq(debtInput, input);
+        uint256 expectedCollateralOut = (debtInput * collateralAmount) / expectProfit;
+        assertEq(collateralOutput, expectedCollateralOut);
+
+        // prepare a taker with enough debt token (USDC) and approve the PIV contract
+        address taker = vm.addr(10);
+        address receiver = vm.addr(11);
+        usdc.mint(taker, debtInput);
+        vm.prank(taker);
+        usdc.approve(address(piv), debtInput);
+
+        // ensure the PIV contract holds the collateral token to be transferred
+        weth.mint(address(this), collateralOutput);
+        weth.transfer(address(piv), collateralOutput);
+
+        uint256 takerBefore = usdc.balanceOf(taker);
+        uint256 receiverBefore = weth.balanceOf(receiver);
+
+        // taker takes the position
+        vm.prank(taker);
+        (uint256 actualDebtInput, uint256 actualCollateralOutput) = piv.takePosition(1, input, receiver);
+
+        // verify returned values and transfers
+        assertEq(actualDebtInput, debtInput);
+        assertEq(actualCollateralOutput, collateralOutput);
+        assertEq(usdc.balanceOf(taker), takerBefore - debtInput);
+        assertEq(weth.balanceOf(receiver), receiverBefore + collateralOutput);
+
+        // verify position updated in storage
+        (,,, int256 debtAmountAfter,,,,) = piv.positionMapping(1);
+        assertEq(debtAmountAfter, int256(debtAmount) - int256(debtInput));
+    }
+
     function test_takePosition_transfersAndUpdatesPosition() public {
         // reuse migrate flow to create a position
         Position memory position;

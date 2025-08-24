@@ -198,7 +198,9 @@ contract PIV is IAaveV3FlashLoanReceiver, Ownable, EIP712, IPIV, ReentrancyGuard
         view
         returns (uint256 debtInput, uint256 collateralOutput)
     {
-        if (position.expectProfit == 0 || position.deadline > block.timestamp) {
+        // If there's no expected profit, nobody can take.
+        // If a deadline is set (non-zero) and it has already passed, taking is disallowed.
+        if (position.expectProfit == 0 || (position.deadline != 0 && block.timestamp > position.deadline)) {
             return (0, 0);
         }
         debtInput = inputAmount > position.expectProfit ? position.expectProfit : inputAmount;

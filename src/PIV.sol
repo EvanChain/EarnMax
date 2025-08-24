@@ -132,9 +132,8 @@ contract PIV is IAaveV3FlashLoanReceiver, Ownable, EIP712, IPIV, ReentrancyGuard
     }
 
     function _closePosition(bytes memory params, address asset, uint256 amount, uint256 premium) internal {
-        (uint256 positionId, Position memory position, SwapUnit[] memory swapUnits) = abi.decode(
-            params, (uint256, Position, SwapUnit[])
-        );
+        (uint256 positionId, Position memory position, SwapUnit[] memory swapUnits) =
+            abi.decode(params, (uint256, Position, SwapUnit[]));
         //repay debt
         IERC20(asset).safeIncreaseAllowance(POOL, amount);
         IAaveV3PoolMinimal(POOL).repay(asset, amount, position.interestRateMode, address(this));

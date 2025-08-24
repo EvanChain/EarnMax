@@ -309,7 +309,7 @@ contract PIVTest is Test {
         assertEq(piv.totalPositions(), 1);
 
         // Get the actual debt amount after migration (includes premium from migration)
-        (, , , int256 actualDebtAmount, , , , ) = piv.positionMapping(1);
+        (,,, int256 actualDebtAmount,,,,) = piv.positionMapping(1);
         uint256 actualDebt = uint256(actualDebtAmount);
 
         // deploy a mock swap adapter for closing
@@ -345,7 +345,7 @@ contract PIVTest is Test {
             uint256 expectProfit0,
             uint256 deadline0
         ) = piv.positionMapping(1);
-        
+
         assertTrue(debtAmount0 > 0, "Position should have debt before closing");
         assertTrue(collateralAmount0 > 0, "Position should have collateral before closing");
 
@@ -395,7 +395,7 @@ contract PIVTest is Test {
         uint256 posId = piv.migrateFromAave(position);
 
         // Get the actual debt amount after migration
-        (, , , int256 actualDebtAmount, , , , ) = piv.positionMapping(1);
+        (,,, int256 actualDebtAmount,,,,) = piv.positionMapping(1);
         uint256 actualDebt = uint256(actualDebtAmount);
 
         // close the position first
@@ -534,7 +534,7 @@ contract PIVTest is Test {
         assertEq(piv.totalPositions(), 1);
 
         // get the actual debt amount after creation (includes premium)
-        (, , , int256 actualDebtAmount, , , , ) = piv.positionMapping(1);
+        (,,, int256 actualDebtAmount,,,,) = piv.positionMapping(1);
         uint256 actualDebt = uint256(actualDebtAmount);
 
         // calculate required amount for closing
@@ -556,16 +556,8 @@ contract PIVTest is Test {
         piv.closePosition(1, closeUnits);
 
         // verify position is closed
-        (
-            ,
-            uint256 collateralAmount1,
-            ,
-            int256 debtAmount1,
-            ,
-            ,
-            uint256 expectProfit1,
-            uint256 deadline1
-        ) = piv.positionMapping(1);
+        (, uint256 collateralAmount1,, int256 debtAmount1,,, uint256 expectProfit1, uint256 deadline1) =
+            piv.positionMapping(1);
 
         assertEq(debtAmount1, -int256(expectedProfit), "Debt amount should be negative profit after closing");
         assertEq(collateralAmount1, 0, "Collateral amount should be zero after closing");

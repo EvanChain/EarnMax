@@ -45,11 +45,8 @@ export default function App() {
   const [deploying, setDeploying] = useState(false)
   const [diagInfo, setDiagInfo] = useState(null)
 
-  // PIV contract used for quick 'leverage' action (fixed as requested)
-  const PIV_FIXED_ADDR = '0x29D88ccDCD0326E05D8845A935CFCC1072c4084b'
-  
   // Default PIV address to scan for takeable positions
-  const DEFAULT_SCAN_PIV_ADDR = '0x4479B26363c0465EE05A45ED13B4fAeA3E8b009A'
+  const DEFAULT_SCAN_PIV_ADDR = '0x1aD5fc72C997A4BBc3cb5dD8028b0D884AF7E2cB'
 
   // Loan form state
   const [showLoanForm, setShowLoanForm] = useState(false)
@@ -65,6 +62,10 @@ export default function App() {
   const [loanUseClosePrice, setLoanUseClosePrice] = useState(false)
   const [loanClosePriceInput, setLoanClosePriceInput] = useState('')
   const [principalAllowance, setPrincipalAllowance] = useState('0')
+
+  // Take allowance state
+  const [takeAllowance, setTakeAllowance] = useState('0')
+  const [takeApproving, setTakeApproving] = useState(false)
 
   // Pricing / protocol limits used to compute amounts for the form
   const PT_PRICE_USDC = 0.8 // price of 1 PT in USDC
@@ -308,6 +309,51 @@ export default function App() {
       setPrincipalAllowance(ethers.utils.formatUnits(allowance, 6)) // USDC has 6 decimals
     } catch (e) {
       console.error('checkPrincipalAllowance error', e)
+    }
+  }
+
+  // Check USDC allowance for Router contract (for take operations)
+  async function checkTakeAllowance() {
+    if (!signer || !account || !mockUSDCAddr) return
+    try {
+      const usdcContract = new ethers.Contract(mockUSDCAddr, erc20Abi, signer)
+      const allowance = await usdcContract.allowance(account, routerAddr)
+      setTakeAllowance(ethers.utils.formatUnits(allowance, 6)) // USDC has 6 decimals
+    } catch (e) {
+      console.error('checkTakeAllowance error', e)
+    }
+  }
+
+  // Approve USDC for Router contract (for take operations)
+  async function approveTake() {
+    if (!signer || !mockUSDCAddr) {
+      setError('请先连接钱包')
+      return
+    }
+    
+    const takeAmount = Number(takeAmountInput || '0')
+    if (!(takeAmount > 0)) {
+      setError('请输入有效的take金额')
+      return
+    }
+
+    setTakeApproving(true)
+    setError(null)
+    try {
+      const usdcContract = new ethers.Contract(mockUSDCAddr, erc20Abi, signer)
+      const takeAmountBN = ethers.utils.parseUnits(takeAmount.toFixed(6), 6)
+      
+      const tx = await usdcContract.approve(routerAddr, takeAmountBN)
+      await tx.wait()
+      
+      // refresh allowance
+      await checkTakeAllowance()
+      setError(`USDC 授权成功 (交易哈希: ${tx.hash})`)
+    } catch (e) {
+      console.error('approveTake error', e)
+      setError('USDC 授权失败：' + (e.message || e.toString()))
+    } finally {
+      setTakeApproving(false)
     }
   }
 
@@ -631,6 +677,21 @@ export default function App() {
     }
   }, [showBalancePage, account, userPivAddr])
 
+  // Auto-fetch all positions when dex page is opened
+  useEffect(() => {
+    if (showDexPage && account) {
+      fetchAllPositions()
+      checkTakeAllowance() // Also check take allowance when dex page opens
+    }
+  }, [showDexPage, account])
+
+  // Check take allowance when take amount changes
+  useEffect(() => {
+    if (showDexPage && account && mockUSDCAddr) {
+      checkTakeAllowance()
+    }
+  }, [takeAmountInput, showDexPage, account, mockUSDCAddr])
+
   function updateTokenLeverage(symbol, val) {
     setTokenLeverages(prev => ({ ...prev, [symbol]: val }))
   }
@@ -684,7 +745,7 @@ export default function App() {
             
             // Only include positions that can be taken by others
             const canTake = pos.expectProfit.gt(0) && 
-                           (pos.deadline.toNumber() === 0 || pos.deadline.toNumber() > Math.floor(Date.now() / 1000))
+                           (pos.deadline.toNumber() !== 0 || pos.deadline.toNumber() <= Math.floor(Date.now() / 1000))
             
             if (canTake) {
               allPositionsData.push({
@@ -770,6 +831,13 @@ export default function App() {
       setError('请输入有效的take金额')
       return
     }
+
+    // Check allowance before proceeding
+    const currentAllowance = Number(takeAllowance || '0')
+    if (currentAllowance < takeAmount) {
+      setError('USDC 授权不足，请先授权足够的金额')
+      return
+    }
     
     setTakePositionLoading(true)
     setError(null)
@@ -781,15 +849,7 @@ export default function App() {
         return
       }
       
-      const usdcContract = new ethers.Contract(mockUSDCAddr, erc20Abi, signer)
       const takeAmountBN = ethers.utils.parseUnits(takeAmount.toFixed(6), 6)
-      const allowance = await usdcContract.allowance(account, routerAddr)
-      
-      if (allowance.lt(takeAmountBN)) {
-        // Need to approve Router first
-        const approveTx = await usdcContract.approve(routerAddr, takeAmountBN)
-        await approveTx.wait()
-      }
       
       // Prepare position data for Router
       const positionDatas = selectedTakePositions.map(pos => ({
@@ -814,9 +874,10 @@ export default function App() {
       
       setError(`Take position 成功! (交易哈希: ${tx.hash})`)
       
-      // Refresh positions and balances
+      // Refresh positions, balances, and allowances
       await fetchAllPositions()
       await fetchTokenBalances()
+      await checkTakeAllowance()
       
       // Clear selections
       setSelectedTakePositions([])
@@ -840,13 +901,6 @@ export default function App() {
       }
     })
   }
-
-  // Auto-fetch all positions when dex page is opened
-  useEffect(() => {
-    if (showDexPage && account) {
-      fetchAllPositions()
-    }
-  }, [showDexPage, account])
 
   return (
     <div className="app" style={{ boxSizing: 'border-box', maxWidth: 1200, margin: '0 auto', padding: 16 }}>
@@ -1297,27 +1351,64 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* USDC 授权状态 */}
+                <div style={{ 
+                  marginBottom: 16, 
+                  padding: 12, 
+                  background: 'rgba(16,185,129,0.05)', 
+                  borderRadius: 8, 
+                  border: '1px solid rgba(16,185,129,0.2)' 
+                }}>
+                  <div style={{ fontSize: 14, color: '#10b981', marginBottom: 8, fontWeight: 600 }}>
+                    💰 USDC 授权状态
+                  </div>
+                  <div style={{ fontSize: 13, color: 'white', marginBottom: 8 }}>
+                    当前授权余额: <strong>{Number(takeAllowance).toFixed(2)} USDC</strong>
+                    {Number(takeAllowance) < Number(takeAmountInput || '0') && (
+                      <span style={{ color: '#ef4444', marginLeft: 8 }}>⚠️ 授权不足</span>
+                    )}
+                  </div>
+                  <button 
+                    onClick={approveTake} 
+                    disabled={takeApproving || !takeAmountInput || Number(takeAmountInput) <= 0} 
+                    style={{ 
+                      padding: '8px 16px', 
+                      background: takeApproving ? '#9ca3af' : '#10b981', 
+                      color: 'white', 
+                      border: 'none', 
+                      borderRadius: 6,
+                      cursor: takeApproving ? 'not-allowed' : 'pointer',
+                      fontSize: 14,
+                      fontWeight: 600
+                    }}
+                  >
+                    {takeApproving ? '🔄 授权中...' : '✅ 授权 USDC'}
+                  </button>
+                </div>
+
                 {/* Execute Button */}
                 <button 
                   onClick={executeTakePosition}
-                  disabled={takePositionLoading || selectedTakePositions.length === 0 || !takeAmountInput || Number(takeAmountInput) <= 0}
+                  disabled={takePositionLoading || selectedTakePositions.length === 0 || !takeAmountInput || Number(takeAmountInput) <= 0 || Number(takeAllowance) < Number(takeAmountInput || '0')}
                   style={{ 
                     width: '100%',
                     padding: '12px 24px', 
                     borderRadius: 8, 
-                    background: (takePositionLoading || selectedTakePositions.length === 0 || !takeAmountInput || Number(takeAmountInput) <= 0) 
+                    background: (takePositionLoading || selectedTakePositions.length === 0 || !takeAmountInput || Number(takeAmountInput) <= 0 || Number(takeAllowance) < Number(takeAmountInput || '0')) 
                       ? '#6b7280' 
                       : 'linear-gradient(90deg, #f59e0b, #f97316)', 
                     color: 'white', 
                     border: 'none',
-                    cursor: (takePositionLoading || selectedTakePositions.length === 0 || !takeAmountInput || Number(takeAmountInput) <= 0) 
+                    cursor: (takePositionLoading || selectedTakePositions.length === 0 || !takeAmountInput || Number(takeAmountInput) <= 0 || Number(takeAllowance) < Number(takeAmountInput || '0')) 
                       ? 'not-allowed' 
                       : 'pointer',
                     fontSize: 16,
                     fontWeight: 600
                   }}
                 >
-                  {takePositionLoading ? '⏳ 执行中...' : `🚀 Execute Take (${selectedTakePositions.length} positions)`}
+                  {takePositionLoading ? '⏳ 执行中...' : 
+                   Number(takeAllowance) < Number(takeAmountInput || '0') ? '❌ 需要先授权 USDC' :
+                   `🚀 Execute Take (${selectedTakePositions.length} positions)`}
                 </button>
               </div>
 

@@ -133,6 +133,9 @@ contract PIVTest is Test {
         vm.prank(user);
         piv.migrateFromAave(position);
 
+        // Get the actual debt amount after migration (includes flash loan premium)
+        (,,, int256 actualDebtAfterMigration,,,,) = piv.positionMapping(1);
+
         // update expectProfit and deadline in the future so position is takeable
         uint256 expectProfit = 500e6; // expected profit in debt token units
         uint256 deadline = block.timestamp + 1 hours; // future deadline
@@ -172,9 +175,9 @@ contract PIVTest is Test {
         assertEq(usdc.balanceOf(taker), takerBefore - debtInput);
         assertEq(weth.balanceOf(receiver), receiverBefore + collateralOutput);
 
-        // verify position updated in storage
+        // verify position updated in storage - should account for flash loan premium
         (,,, int256 debtAmountAfter,,,,) = piv.positionMapping(1);
-        assertEq(debtAmountAfter, int256(debtAmount) - int256(debtInput));
+        assertEq(debtAmountAfter, actualDebtAfterMigration - int256(debtInput));
     }
 
     function test_takePosition_transfersAndUpdatesPosition() public {

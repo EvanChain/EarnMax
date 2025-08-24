@@ -46,7 +46,7 @@ export default function App() {
   const [diagInfo, setDiagInfo] = useState(null)
 
   // Default PIV address to scan for takeable positions
-  const DEFAULT_SCAN_PIV_ADDR = '0xFC701a7f3a3133A0f8eD2E3461dA28cb66D80258'
+  const DEFAULT_SCAN_PIV_ADDR = '0x86954F830647d291186E90B1bB9C725f6901A9da'
 
   // Loan form state
   const [showLoanForm, setShowLoanForm] = useState(false)

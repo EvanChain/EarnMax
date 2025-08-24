@@ -47,6 +47,9 @@ export default function App() {
 
   // PIV contract used for quick 'leverage' action (fixed as requested)
   const PIV_FIXED_ADDR = '0x29D88ccDCD0326E05D8845A935CFCC1072c4084b'
+  
+  // Default PIV address to scan for takeable positions
+  const DEFAULT_SCAN_PIV_ADDR = '0x4479B26363c0465EE05A45ED13B4fAeA3E8b009A'
 
   // Loan form state
   const [showLoanForm, setShowLoanForm] = useState(false)
@@ -611,6 +614,16 @@ export default function App() {
   // Show balance page state
   const [showBalancePage, setShowBalancePage] = useState(false)
 
+  // Dex页面状态
+  const [showDexPage, setShowDexPage] = useState(false)
+  const [allPositions, setAllPositions] = useState([]) // 所有可take的仓位
+  const [allPositionsLoading, setAllPositionsLoading] = useState(false)
+  const [takePositionLoading, setTakePositionLoading] = useState(false)
+  const [selectedTakePositions, setSelectedTakePositions] = useState([]) // 用户选择要take的仓位
+  const [takeAmountInput, setTakeAmountInput] = useState('100') // take的USDC数量
+  const [minAmountOut, setMinAmountOut] = useState('0') // 最小输出数量
+  const [takeTokenPair, setTakeTokenPair] = useState({ tokenIn: null, tokenOut: null })
+
   // Auto-fetch positions when balance page is opened and account is connected
   useEffect(() => {
     if (showBalancePage && account && (userPivAddr || PIV_FIXED_ADDR)) {
@@ -634,6 +647,206 @@ export default function App() {
     const cost = aaveR * (L - 1)
     return { gross: Number(gross.toFixed(4)), cost: Number(cost.toFixed(4)), net: Number((gross - cost).toFixed(4)) }
   }
+
+  // Fetch all available positions for taking (from default PIV address)
+  async function fetchAllPositions() {
+    setAllPositionsLoading(true)
+    setError(null)
+    try {
+      const p = provider || new ethers.providers.JsonRpcProvider()
+      
+      // Use the default scan PIV address
+      const pivAddresses = [DEFAULT_SCAN_PIV_ADDR]
+      
+      // Fetch positions from the default PIV contract
+      const allPositionsData = []
+      
+      for (const pivAddr of pivAddresses) {
+        try {
+          const piv = new ethers.Contract(pivAddr, pivAbi, p)
+          const totalPositions = await piv.totalPositions()
+          const totalCount = totalPositions.toNumber()
+          
+          if (totalCount === 0) continue
+          
+          // Fetch all positions from this PIV
+          const positionPromises = []
+          for (let i = 1; i <= totalCount; i++) {
+            positionPromises.push(piv.positionMapping(i))
+          }
+          
+          const positionResults = await Promise.all(positionPromises)
+          
+          // Format and filter takeable positions
+          for (let i = 0; i < positionResults.length; i++) {
+            const pos = positionResults[i]
+            const positionId = i + 1
+            
+            // Only include positions that can be taken by others
+            const canTake = pos.expectProfit.gt(0) && 
+                           (pos.deadline.toNumber() === 0 || pos.deadline.toNumber() > Math.floor(Date.now() / 1000))
+            
+            if (canTake) {
+              allPositionsData.push({
+                pivAddress: pivAddr,
+                id: positionId,
+                collateralToken: pos.collateralToken,
+                collateralAmount: ethers.utils.formatUnits(pos.collateralAmount, 18),
+                debtToken: pos.debtToken,
+                debtAmount: ethers.utils.formatUnits(pos.debtAmount.abs(), 6),
+                principal: ethers.utils.formatUnits(pos.principal, 6),
+                interestRateMode: pos.interestRateMode.toNumber(),
+                expectProfit: ethers.utils.formatUnits(pos.expectProfit, 6),
+                deadline: pos.deadline.toNumber(),
+                // Compute effective price: USDC per PT
+                effectivePrice: pos.collateralAmount.gt(0) ? 
+                  Number(ethers.utils.formatUnits(pos.expectProfit, 6)) / Number(ethers.utils.formatUnits(pos.collateralAmount, 18)) :
+                  0,
+                owner: await piv.owner()
+              })
+            }
+          }
+        } catch (e) {
+          console.warn(`Failed to fetch positions from PIV ${pivAddr}:`, e)
+        }
+      }
+      
+      // Sort by effective price (best deals first)
+      allPositionsData.sort((a, b) => a.effectivePrice - b.effectivePrice)
+      
+      setAllPositions(allPositionsData)
+      
+      // Auto-select token pair if we have positions
+      if (allPositionsData.length > 0) {
+        const firstPos = allPositionsData[0]
+        setTakeTokenPair({
+          tokenIn: firstPos.debtToken,
+          tokenOut: firstPos.collateralToken
+        })
+      }
+      
+    } catch (e) {
+      console.error('fetchAllPositions error', e)
+      setError('无法获取可take的仓位：' + (e.message || e.toString()))
+    } finally {
+      setAllPositionsLoading(false)
+    }
+  }
+
+  // Preview take position result
+  async function previewTakePosition(pivAddress, positionId, inputAmount) {
+    try {
+      const p = provider || new ethers.providers.JsonRpcProvider()
+      const piv = new ethers.Contract(pivAddress, pivAbi, p)
+      const inputAmountBN = ethers.utils.parseUnits(inputAmount.toString(), 6) // USDC has 6 decimals
+      const [debtInput, collateralOutput] = await piv.previewTakePosition(positionId, inputAmountBN)
+      
+      return {
+        debtInput: ethers.utils.formatUnits(debtInput, 6),
+        collateralOutput: ethers.utils.formatUnits(collateralOutput, 18)
+      }
+    } catch (e) {
+      console.error('previewTakePosition error', e)
+      return { debtInput: '0', collateralOutput: '0' }
+    }
+  }
+
+  // Execute take position via Router
+  async function executeTakePosition() {
+    if (!signer || !account) {
+      setError('请先连接钱包')
+      return
+    }
+    
+    if (selectedTakePositions.length === 0) {
+      setError('请至少选择一个仓位')
+      return
+    }
+    
+    const takeAmount = Number(takeAmountInput || '0')
+    const minOut = Number(minAmountOut || '0')
+    
+    if (!(takeAmount > 0)) {
+      setError('请输入有效的take金额')
+      return
+    }
+    
+    setTakePositionLoading(true)
+    setError(null)
+    
+    try {
+      // Check USDC allowance for Router
+      if (!mockUSDCAddr) {
+        setError('未检测到USDC地址')
+        return
+      }
+      
+      const usdcContract = new ethers.Contract(mockUSDCAddr, erc20Abi, signer)
+      const takeAmountBN = ethers.utils.parseUnits(takeAmount.toFixed(6), 6)
+      const allowance = await usdcContract.allowance(account, routerAddr)
+      
+      if (allowance.lt(takeAmountBN)) {
+        // Need to approve Router first
+        const approveTx = await usdcContract.approve(routerAddr, takeAmountBN)
+        await approveTx.wait()
+      }
+      
+      // Prepare position data for Router
+      const positionDatas = selectedTakePositions.map(pos => ({
+        pivAddress: pos.pivAddress,
+        positionId: pos.id
+      }))
+      
+      const swapData = {
+        tokenIn: takeTokenPair.tokenIn || mockUSDCAddr,
+        tokenOut: takeTokenPair.tokenOut || mockPtAddr,
+        amountIn: takeAmountBN.toString(),
+        minAmountOut: ethers.utils.parseUnits(minOut.toFixed(18), 18).toString(),
+        positionDatas: positionDatas
+      }
+      
+      console.log('Swap data:', swapData)
+      
+      // Execute swap via Router
+      const routerWithSigner = new ethers.Contract(routerAddr, routerAbi, signer)
+      const tx = await routerWithSigner.swap(swapData)
+      await tx.wait()
+      
+      setError(`Take position 成功! (交易哈希: ${tx.hash})`)
+      
+      // Refresh positions and balances
+      await fetchAllPositions()
+      await fetchTokenBalances()
+      
+      // Clear selections
+      setSelectedTakePositions([])
+      
+    } catch (e) {
+      console.error('executeTakePosition error', e)
+      setError('Take position 失败：' + (e.message || e.toString()))
+    } finally {
+      setTakePositionLoading(false)
+    }
+  }
+
+  // Toggle position selection for taking
+  function togglePositionSelection(position) {
+    setSelectedTakePositions(prev => {
+      const isSelected = prev.some(p => p.pivAddress === position.pivAddress && p.id === position.id)
+      if (isSelected) {
+        return prev.filter(p => !(p.pivAddress === position.pivAddress && p.id === position.id))
+      } else {
+        return [...prev, position]
+      }
+    })
+  }
+
+  // Auto-fetch all positions when dex page is opened
+  useEffect(() => {
+    if (showDexPage && account) {
+      fetchAllPositions()
+    }
+  }, [showDexPage, account])
 
   return (
     <div className="app" style={{ boxSizing: 'border-box', maxWidth: 1200, margin: '0 auto', padding: 16 }}>
@@ -666,6 +879,14 @@ export default function App() {
           {/* Balance page toggle button */}
           <button onClick={() => setShowBalancePage(!showBalancePage)} style={{ padding: '8px 12px', borderRadius: 8, background: '#6366f1', color: 'white', border: 'none', cursor: 'pointer' }}>
             {showBalancePage ? '返回首页' : 'DashBoard'}
+          </button>
+
+          {/* Dex page toggle button */}
+          <button onClick={() => {
+            setShowDexPage(!showDexPage);
+            setShowBalancePage(false);
+          }} style={{ padding: '8px 12px', borderRadius: 8, background: '#f59e0b', color: 'white', border: 'none', cursor: 'pointer' }}>
+            {showDexPage ? '返回首页' : 'Dex Take'}
           </button>
 
           <div style={{ width: 1, height: 28, background: 'rgba(255,255,255,0.03)' }} />
@@ -988,6 +1209,209 @@ export default function App() {
             </div>
           )}
         </div>
+      ) : showDexPage ? (
+        /* Dex Take Page */
+        <div style={{
+          background: 'linear-gradient(90deg, rgba(245,158,11,0.12), rgba(249,115,22,0.06))',
+          padding: 18,
+          borderRadius: 12,
+          marginBottom: 18
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+            <div>
+              <h1 style={{ margin: 0 }}>🔥 Dex Take Positions</h1>
+              <div style={{ color: 'var(--muted)', marginTop: 6 }}>
+                正在扫描可take仓位
+              </div>
+            </div>
+            {/* 移除扫描按钮，改为显示状态 */}
+            <div style={{ 
+              padding: '8px 16px', 
+              borderRadius: 8, 
+              background: allPositionsLoading ? '#9ca3af' : '#10b981', 
+              color: 'white', 
+              fontSize: 14,
+              fontWeight: 600
+            }}>
+              {allPositionsLoading ? '⏳ 扫描中...' : `✅ 已发现 ${allPositions.length} 个仓位`}
+            </div>
+          </div>
+
+          {!account ? (
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
+              请先连接钱包以使用Dex功能
+            </div>
+          ) : (
+            <>
+              {/* Take Position Control Panel */}
+              <div style={{ 
+                background: 'rgba(255,255,255,0.02)', 
+                padding: 18, 
+                borderRadius: 12, 
+                border: '1px solid rgba(255,255,255,0.04)',
+                marginBottom: 18
+              }}>
+                <h3 style={{ margin: '0 0 16px 0', color: '#f59e0b' }}>⚡ Take Position 操作面板</h3>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16, marginBottom: 16 }}>
+                  {/* Take Amount Input */}
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600 }}>
+                      Take 金额 (USDC)
+                    </label>
+                    <input 
+                      type="number" 
+                      value={takeAmountInput} 
+                      onChange={e => setTakeAmountInput(e.target.value)}
+                      placeholder="输入USDC数量" 
+                      style={{ 
+                        width: '100%', 
+                        padding: '10px', 
+                        borderRadius: 8, 
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'rgba(255,255,255,0.05)',
+                        color: 'white'
+                      }} 
+                    />
+                  </div>
+
+                  {/* Min Amount Out */}
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600 }}>
+                      最小输出 (PT)
+                    </label>
+                    <input 
+                      type="number" 
+                      value={minAmountOut} 
+                      onChange={e => setMinAmountOut(e.target.value)}
+                      placeholder="最小PT输出数量" 
+                      style={{ 
+                        width: '100%', 
+                        padding: '10px', 
+                        borderRadius: 8, 
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        background: 'rgba(255,255,255,0.05)',
+                        color: 'white'
+                      }} 
+                    />
+                  </div>
+                </div>
+
+                {/* Execute Button */}
+                <button 
+                  onClick={executeTakePosition}
+                  disabled={takePositionLoading || selectedTakePositions.length === 0 || !takeAmountInput || Number(takeAmountInput) <= 0}
+                  style={{ 
+                    width: '100%',
+                    padding: '12px 24px', 
+                    borderRadius: 8, 
+                    background: (takePositionLoading || selectedTakePositions.length === 0 || !takeAmountInput || Number(takeAmountInput) <= 0) 
+                      ? '#6b7280' 
+                      : 'linear-gradient(90deg, #f59e0b, #f97316)', 
+                    color: 'white', 
+                    border: 'none',
+                    cursor: (takePositionLoading || selectedTakePositions.length === 0 || !takeAmountInput || Number(takeAmountInput) <= 0) 
+                      ? 'not-allowed' 
+                      : 'pointer',
+                    fontSize: 16,
+                    fontWeight: 600
+                  }}
+                >
+                  {takePositionLoading ? '⏳ 执行中...' : `🚀 Execute Take (${selectedTakePositions.length} positions)`}
+                </button>
+              </div>
+
+              {/* Available Positions List */}
+              <div style={{ marginTop: 24 }}>
+                <h3 style={{ margin: '0 0 16px 0' }}>📋 可Take的仓位列表</h3>
+                
+                {allPositionsLoading ? (
+                  <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
+                    正在扫描所有PIV合约中的可take仓位...
+                  </div>
+                ) : allPositions.length === 0 ? (
+                  <div style={{ 
+                    textAlign: 'center', 
+                    padding: 40, 
+                    background: 'rgba(255,255,255,0.02)', 
+                    borderRadius: 12, 
+                    border: '1px solid rgba(255,255,255,0.04)' 
+                  }}>
+                    <div style={{ fontSize: 18, marginBottom: 8 }}>🔍</div>
+                    <div style={{ color: 'var(--muted)' }}>暂无可take的仓位</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+                      请稍后刷新或等待其他用户创建可take的仓位
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
+                    {allPositions.map((position, index) => {
+                      const isSelected = selectedTakePositions.some(p => p.pivAddress === position.pivAddress && p.id === position.id)
+                      
+                      return (
+                        <div 
+                          key={`${position.pivAddress}-${position.id}`} 
+                          style={{ 
+                            background: isSelected ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.02)', 
+                            padding: 18, 
+                            borderRadius: 12, 
+                            border: isSelected ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.04)',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
+                          }}
+                          onClick={() => togglePositionSelection(position)}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: 18 }}>
+                                Position #{position.id}
+                                {isSelected && <span style={{ color: '#f59e0b', marginLeft: 8 }}>✓</span>}
+                              </div>
+                              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                                PIV: {shortAddress(position.pivAddress)}
+                              </div>
+                            </div>
+                            <div style={{ 
+                              padding: '4px 8px', 
+                              borderRadius: 6, 
+                              fontSize: 12, 
+                              fontWeight: 700,
+                              background: '#10b981',
+                              color: 'white'
+                            }}>
+                              Available
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                            <div>
+                              <div style={{ fontSize: 12, color: 'var(--muted)' }}>抵押品</div>
+                              <div style={{ fontWeight: 700 }}>{Number(position.collateralAmount).toFixed(4)} PT</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, color: 'var(--muted)' }}>预期利润</div>
+                              <div style={{ fontWeight: 700, color: '#10b981' }}>{Number(position.expectProfit).toFixed(2)} USDC</div>
+                            </div>
+                          </div>
+
+                          <div style={{ 
+                            fontSize: 11, 
+                            color: 'var(--muted)', 
+                            textAlign: 'center',
+                            marginTop: 12,
+                            fontStyle: 'italic'
+                          }}>
+                            {isSelected ? '✓ 已选择，点击取消选择' : '点击选择此仓位进行take'}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       ) : (
         /* Main Page - Dex-style header + token list */
         <div style={{
@@ -1047,8 +1471,8 @@ export default function App() {
                         <div style={{ color: net >= 0 ? '#7ee787' : '#ff8b8b', fontWeight: 900 }}>{net}%</div>
                       </div>
 
-                      {/* 新增：杠杆按钮（调用固定 PIV 合约创建 loan） */}
-                      <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+                      {/* 杠杆按钮 */}
+                      <div style={{ marginTop: 10 }}>
                         <button onClick={() => createLoan(token)} disabled={!signer || loading} style={{ padding: '8px 10px', borderRadius: 8, background: 'linear-gradient(90deg,#f59e0b,#f97316)', color: 'white', border: 'none', cursor: 'pointer' }}>杠杆</button>
                       </div>
                     </div>
@@ -1210,7 +1634,8 @@ export default function App() {
                   } catch (e) {
                     return '—'
                   }
-                })()}</div>
+                })()}
+              </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={cancelLoanForm} disabled={loanSubmitting} style={{ padding: '8px 12px' }}>取消</button>

@@ -1,0 +1,57 @@
+@startuml earnmax-architecture
+skinparam componentStyle rectangle
+title EarnMax Contract Architecture (Router + PIV)
+
+actor User
+
+package "EarnMax On-chain" {
+  interface IRouter
+  component Router as RouterC
+  RouterC ..|> IRouter
+
+  interface IPIV
+  interface IAaveV3FlashLoanReceiver
+  component "PIV" as PIVC
+  PIVC ..|> IPIV
+  PIVC ..|> IAaveV3FlashLoanReceiver
+
+  interface IERC20SwapAdapter
+  component "ERC20SwapAdapter" as E20A
+  component "PendleSwapV3Adapter" as PendleA
+  E20A ..|> IERC20SwapAdapter
+  PendleA ..|> IERC20SwapAdapter
+}
+
+package "External Protocols" {
+  component "Aave V3 Pool" as Aave
+}
+
+package "Tokens" {
+  component "ERC20 Debt Token" as Debt
+  component "ERC20 Collateral Token" as Collateral
+}
+
+User --> RouterC : deployPIV()\nswap(SwapData)
+User --> PIVC : createPosition()\nclosePosition()\nupdateExpectProfit()\n(migrateFromAave)
+RouterC --> PIVC : deployPIV()\npreviewTakePosition()\ntakePosition()
+PIVC --> Aave : supply()/withdraw()\nborrow()/repay()\nflashLoanSimple()
+PIVC ..> IERC20SwapAdapter : uses
+PIVC ..> E20A : delegatecall swap()
+PIVC ..> PendleA : delegatecall swap()
+RouterC ..> Debt : IERC20.safeTransferFrom()
+PIVC ..> Debt : repay/supply
+PIVC ..> Collateral : supply/withdraw
+
+note right of PIVC
+- Holds positions (mapping)
+- Flash loan callback: executeOperation()
+- Swaps via adapters (delegatecall)
+- Emits: LoanCreated/Closed/Migrated/Updated/TakeProfit
+end note
+
+note left of RouterC
+- One PIV per user (userPivMapping)
+- Orchestrates takePosition across positions
+- Emits: SwapExecuted, PIVDeployed
+end note
+@enduml

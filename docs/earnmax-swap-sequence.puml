@@ -1,0 +1,21 @@
+@startuml earnmax-swap-sequence
+title Swap via Router -> PIV takePosition
+actor User
+participant Router
+participant "PIV (user's)" as PIV
+participant "Aave V3 Pool" as Aave
+
+User -> Router: swap(SwapData)
+Router -> Router: 收款 tokenIn
+loop positions
+  Router -> PIV: previewTakePosition(id, remain)
+  alt 可成交
+    Router -> PIV: takePosition(id, input, Router)
+    PIV -> Aave: repay (debt)
+    PIV -> Aave: supply(剩余 debt)
+    PIV -> Aave: withdraw(collateral -> Router)
+    PIV --> Router: emit PositionTakeProfit
+  end
+end
+Router --> User: emit SwapExecuted(netAmountOut)
+@enduml

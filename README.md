@@ -73,6 +73,20 @@ Run the deploy script using forge. Add --broadcast to send transactions to the n
 forge script script/Deploy.s.sol --rpc-url <your_rpc_url> --private-key <your_private_key> --broadcast
 ```
 
+## Diagrams
+
+### Architecture
+
+![EarnMax Architecture](docs/arc.png)
+
+[PlantUML source](docs/earnmax-architecture.puml)
+
+### Swap Flow
+
+![Swap Sequence](docs/take-sequence.png)
+
+[PlantUML source](docs/earnmax-swap-sequence.puml)
+
 ## Future design
 - Automation close position(end loss)
 - Cross chain leverage with layer zero

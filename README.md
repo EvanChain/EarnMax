@@ -76,3 +76,4 @@ forge script script/Deploy.s.sol --rpc-url <your_rpc_url> --private-key <your_pr
 ## Future design
 - Automation close position(end loss)
 - Cross chain leverage with layer zero
+- Short leverage

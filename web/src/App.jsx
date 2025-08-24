@@ -665,7 +665,7 @@ export default function App() {
 
           {/* Balance page toggle button */}
           <button onClick={() => setShowBalancePage(!showBalancePage)} style={{ padding: '8px 12px', borderRadius: 8, background: '#6366f1', color: 'white', border: 'none', cursor: 'pointer' }}>
-            {showBalancePage ? '返回首页' : '查看余额'}
+            {showBalancePage ? '返回首页' : 'DashBoard'}
           </button>
 
           <div style={{ width: 1, height: 28, background: 'rgba(255,255,255,0.03)' }} />
@@ -702,8 +702,8 @@ export default function App() {
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
             <div>
-              <h1 style={{ margin: 0 }}>测试代币余额</h1>
-              <div style={{ color: 'var(--muted)', marginTop: 6 }}>查看您账户中的测试代币余额</div>
+              <h1 style={{ margin: 0 }}>Assets</h1>
+              <div style={{ color: 'var(--muted)', marginTop: 6 }}>查看您账户中的代币余额</div>
             </div>
             <button 
               onClick={fetchTokenBalances} 
